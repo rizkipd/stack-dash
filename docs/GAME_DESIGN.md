@@ -154,6 +154,41 @@ transitions.
 
 Avoid excessive screen shake or effects that obscure obstacles.
 
+### 11.1 Effect specification
+
+The six effects of the design sheet's EFFECTS & PARTICLES panel, and the
+job each one does. **All values are tunable starting points**; the
+player-experience goal is the part that is fixed.
+
+| Effect | Where | Budget | Life | Goal |
+|---|---|---|---|---|
+| **Hit Explosion** | `PARTICLE_FLASH` + `PARTICLE_SHARD` | 1 + 5 per block | 0.15-0.21 s / 0.26-0.46 s | The alarm. Marks *where* the hit landed, in the first frame, unmistakably. |
+| **Block Destroy** | `PARTICLE_CORE` + `PARTICLE_CHUNK` | 1 + 3 per block | 0.6-0.85 s / 0.5-0.78 s | The receipt. Says *which of your blocks* you lost, in your own blue. |
+| **Star Particles** | `PARTICLE_STAR` | 7 per collect | 0.34-0.56 s | Four-pointed sparkles. Reward, read peripherally. |
+| **Collect Glow** | `PARTICLE_RING` | 2 per collect | 0.42 / 0.52 s | Gold/amber swirl. Says "pickup", not "hit". |
+| **Speed Trail** | per-block, render side | — | — | Speed made visible without extra pool pressure. |
+| **Screen Shake** | `GameEngine.shake` | — | ~0.3 s decay | Impact weight. Subtle; the play field must stay readable *during* it. |
+
+Rules that outrank any of the values above:
+
+1. **Nothing may obscure an approaching obstacle.** This is why the
+   loudest element is also the shortest-lived, why every glow is
+   additive rather than opaque, and why no effect lifetime exceeds
+   0.85 s. An effect the player has to see *past* is a fairness bug,
+   not decoration.
+2. **A gain must never be mistakable for a loss.** The two are
+   separated on shape and motion, not just colour: a collect expands
+   as a clean ring and lifts, a hit sprays outward and falls. Colour
+   alone fails for the ~8% of players with a red/green deficiency and
+   fails for everyone in peripheral vision.
+3. **Destruction feedback is load-bearing.** Under reduce-motion it is
+   damped — shorter lives, smaller travel, no shake — never removed.
+   Losing a block silently is a game that cannot be learned.
+4. **The pool is fixed-capacity** (`gameplay.maxParticles`). The
+   Speed Trail therefore stays a render-side effect: emitting trail
+   particles every frame would let decoration crowd destruction
+   feedback out of the pool, inverting rule 3.
+
 ## 12. Visual Direction
 
 -   Portrait mobile layout.

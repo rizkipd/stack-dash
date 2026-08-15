@@ -201,6 +201,12 @@ Do not use unconstrained random rectangles.
 Generator should support seeded RNG in tests so QA can reproduce
 failures.
 
+**Two independent streams.** `GameEngine` holds `rng` for level generation and
+`fxRng` for particles, both derived from the same run seed. They were one
+stream, which meant changing a particle count silently changed the obstacle
+layout every seed produced --- a purely cosmetic tweak rewrote the level.
+Anything decorative draws from `fxRng`; nothing decorative may touch `rng`.
+
 ## 9. Performance
 
 -   Target 60 FPS.

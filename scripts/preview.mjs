@@ -14,8 +14,10 @@
  * It imports `drawScene` from the app, so what is rendered here is the same
  * code the game runs — not a reimplementation that can drift.
  *
- *   npm run preview            # default frame
- *   npm run preview -- --t=4   # simulate 4 seconds in
+ *   npm run preview                    # default frame
+ *   npm run preview -- --t=4           # simulate 4 seconds in
+ *   npm run preview -- --fx            # trigger a hit burst and a collect
+ *   npm run preview -- --fx --age=0.3  # ...and age it 0.3s before drawing
  *
  * Output: .preview/scene.png (gitignored)
  */
@@ -39,6 +41,18 @@ const WIDTH = arg('w', 390);
 const HEIGHT = arg('h', 844);
 const SECONDS = arg('t', 6);
 const DIFFICULTY = (process.argv.find((a) => a.startsWith('--d=')) ?? '--d=medium').split('=')[1];
+
+/**
+ * Spawn the destruction and collect effects before drawing.
+ *
+ * Particles exist for a fraction of a second immediately after a collision, so
+ * an ordinary preview frame practically never contains one — which made the
+ * effects the least verifiable thing in the renderer, and it showed. `--age`
+ * picks the moment in the burst to freeze: 0 is the flash, ~0.15 is mid-flight
+ * debris, ~0.5 is the fall-and-fade tail.
+ */
+const FX = process.argv.includes('--fx');
+const FX_AGE = arg('age', 0.14);
 
 // --- CanvasKit ---
 const ckDir = join(dirname(require.resolve('canvaskit-wasm/package.json')), 'bin', 'full');
@@ -66,6 +80,7 @@ const ENUMS = {
   blurNormal: 0, // BlurStyle.Normal
   capRound: 1, // StrokeCap.Round
   joinRound: 1, // StrokeJoin.Round
+  tileClamp: 0, // TileMode.Clamp
 };
 
 // --- Load the app's simulation + scene (run under tsx, which handles TS and
@@ -123,6 +138,49 @@ const clearY = (() => {
 })();
 engine.stack = { ...engine.stack, y: clearY, verticalVelocity: -900 };
 
+// --- Effects ---
+// Fired directly rather than by staging a collision, because a real collision
+// also removes the blocks — and the frame worth looking at is the one where the
+// debris is still next to the stack it came from.
+if (FX) {
+  const { burst, sparkle, updateParticles } = await import(
+    pathToFileURL(join(root, 'src/game/engine/Particles.ts')).href
+  );
+  const { blockRect } = await import(
+    pathToFileURL(join(root, 'src/game/entities/PlayerStack.ts')).href
+  );
+  const { createRng } = await import(
+    pathToFileURL(join(root, 'src/game/engine/Rng.ts')).href
+  );
+  const fxRng = createRng(20260815);
+
+  // Burst the top three blocks: a multi-block loss is the worst case for both
+  // readability and pool pressure, so it is the case worth previewing.
+  const n = engine.stack.blocks.length;
+  for (let i = Math.max(0, n - 3); i < n; i += 1) {
+    burst(engine.particles, blockRect(engine.stack, i), fxRng);
+  }
+
+  // A collect, placed just ahead of and below the stack so both effects are in
+  // frame at once and can be compared at a glance — which is the property that
+  // actually matters (a gain must never be mistakable for a loss).
+  sparkle(
+    engine.particles,
+    gameplay.playerX + gameplay.blockSize * 1.8,
+    engine.stack.y + gameplay.blockSize * 1.4,
+    gameplay.blockSize * 0.8,
+    fxRng,
+  );
+
+  for (let i = 0; i < Math.round(FX_AGE / FRAME); i += 1) {
+    updateParticles(engine.particles, FRAME, 0);
+  }
+
+  // Matching shake impulse, so the frame shows the whole hit and not just its
+  // debris.
+  engine.shake = 0.55;
+}
+
 const scale = HEIGHT / gameplay.worldHeight;
 const state = buildRenderState(
   engine,
@@ -174,5 +232,8 @@ writeFileSync(out, png);
 console.log(
   `${out}  ${WIDTH}x${HEIGHT}  ${DIFFICULTY} @ ${SECONDS}s  ` +
     `blocks=${engine.blockCount} obstacles=${engine.obstacles.length} ` +
-    `collectibles=${engine.collectibles.length} distance=${Math.round(engine.distance)}`,
+    `collectibles=${engine.collectibles.length} distance=${Math.round(engine.distance)}` +
+    (FX
+      ? `  fx=on age=${FX_AGE}s particles=${engine.particles.filter((p) => p.active).length}`
+      : ''),
 );

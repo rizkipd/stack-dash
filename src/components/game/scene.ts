@@ -10,7 +10,13 @@
  * `Sk` is injected rather than imported so the harness can pass a CanvasKit
  * shim. In the app it is always the real `Skia` namespace.
  */
-import { PARTICLE_CORE, PARTICLE_STAR } from "@/game/engine/Particles";
+import {
+  PARTICLE_CHUNK,
+  PARTICLE_CORE,
+  PARTICLE_FLASH,
+  PARTICLE_RING,
+  PARTICLE_STAR,
+} from "@/game/engine/Particles";
 import {
   BLOCK_STRIDE,
   COLLECTIBLE_STRIDE,
@@ -31,8 +37,13 @@ const CUBE_VERTS: readonly (readonly [number, number, number])[] = [
   [-1, 1, 1],
 ];
 
-/** Faces as vertex indices, wound so the normal points outward. */
-const CUBE_FACES: readonly (readonly [number, number, number, number])[] = [
+/**
+ * Faces as vertex indices, wound so the normal points outward.
+ *
+ * Exported only so `tests/cube-topology.test.ts` can check it against
+ * `CUBE_FACE_NBR`; nothing else should read it.
+ */
+export const CUBE_FACES: readonly (readonly [number, number, number, number])[] = [
   [0, 1, 2, 3], // back  (−z)
   [5, 4, 7, 6], // front (+z)
   [4, 0, 3, 7], // left  (−x)
@@ -42,26 +53,26 @@ const CUBE_FACES: readonly (readonly [number, number, number, number])[] = [
 ];
 
 /**
- * Cube edges as `[vertexA, vertexB, faceA, faceB]`.
+ * Face adjacency: `CUBE_FACE_NBR[f * 4 + j]` is the face on the other side of
+ * face `f`'s edge `j` (the edge from `CUBE_FACES[f][j]` to `[j + 1]`).
  *
- * An edge is drawn when either adjacent face is visible, which yields each
- * visible edge exactly once. That matters: the neon passes blend additively,
- * so an edge emitted twice would burn twice as bright and the silhouette would
- * read dimmer than the interior seams.
+ * This is what makes the silhouette cheap. An edge is on the silhouette when
+ * exactly one of its two faces is visible; walking the visible faces and
+ * keeping the edges whose neighbour is culled yields the silhouette loop
+ * directly, already correctly wound, with no hull sort and no allocation.
+ *
+ * Derived from the cube's topology and asserted in `tests/cube-topology.test.ts`
+ * — a wrong entry here would silently produce a self-intersecting silhouette,
+ * and only at some rotations, which is precisely the kind of rendering bug
+ * this file has shipped before.
  */
-const CUBE_EDGES: readonly number[] = [
-  0, 1, 0, 4,
-  1, 2, 0, 3,
-  2, 3, 0, 5,
-  3, 0, 0, 2,
-  4, 5, 1, 4,
-  5, 6, 1, 3,
-  6, 7, 1, 5,
-  7, 4, 1, 2,
-  0, 4, 2, 4,
-  1, 5, 3, 4,
-  2, 6, 3, 5,
-  3, 7, 2, 5,
+export const CUBE_FACE_NBR: readonly number[] = [
+  4, 3, 5, 2, // back  (−z)
+  4, 2, 5, 3, // front (+z)
+  4, 0, 5, 1, // left  (−x)
+  4, 1, 5, 0, // right (+x)
+  1, 3, 0, 2, // top   (−y)
+  0, 3, 1, 2, // bottom(+y)
 ];
 
 /**
@@ -341,7 +352,7 @@ const LIGHT_Z = 0.62;
 
 /** Floor brightness. Never 0 — a neon cube's dark side still emits. */
 const CUBE_AMBIENT = 0.12;
-const CUBE_DIFFUSE = 0.42;
+const CUBE_DIFFUSE = 0.48;
 /**
  * Rim/fresnel term. Faces turning edge-on catch light, which is what makes a
  * cube read as glowing volume rather than a painted hexagon.
@@ -354,21 +365,86 @@ const CUBE_RIM = 0.11;
 /** Nearer faces run slightly hotter, separating them at a glance. */
 const CUBE_DEPTH_LIFT = 0.06;
 /**
- * Quantisation of the shade ramp. Faces are flat-shaded, so 12 steps is well
- * past visible banding — and it lets every colour be precomputed once per
- * frame instead of once per face.
+ * Quantisation of the shade ramp.
+ *
+ * A face's Lambert term picks a *step*, and the step keys a memoised gradient
+ * shader — so quantising is what lets a whole frame of glossy faces share a
+ * handful of shaders instead of allocating one per face per frame. 12 steps is
+ * well past visible banding for the base tone.
  */
 const SHADE_STEPS = 12;
 
-// --- Neon passes ---
-// Widths are fractions of the cube's screen size, so the look survives any
-// device scale.
+// --- Cube material ---
+//
+// The sheet's cubes (BLOCK ASSETS panel of `image copy 2.png`) are *rounded
+// boxes* with a glossy gradient across every face and a bright neon fillet
+// where faces meet. Ours were mitred polygons with flat fills and a uniform
+// hairline outline, which is why they read as vector art: hard corners are the
+// single strongest flat-art tell, and a flat fill has no material at all.
+//
+// Every width below is a fraction of the cube's screen size, so the look
+// survives any device scale.
+
+/**
+ * Corner radius of the rounded box.
+ *
+ * Rounding is applied to each *face polygon* and to the silhouette, not to the
+ * screen-space outline of the whole shape — a face is a rounded square that
+ * has been projected. That is what makes it hold up through a 360° tumble:
+ * the radius foreshortens with the face instead of staying a fixed screen
+ * circle that would slide around the silhouette as the cube turns.
+ */
+const CUBE_RADIUS = 0.07;
+
+/**
+ * Half-width of the neon fillet between faces, and of the outline around the
+ * silhouette.
+ *
+ * The silhouette is *grown* outward by this and filled with the edge gradient,
+ * then every face is *shrunk* inward by it on top. One number therefore sets
+ * the outline and the interior seams, both come out `2 ×` wide, and they can
+ * never disagree — which is what the sheet shows: at magnification its outline
+ * and its seams are the same weight.
+ *
+ * `0.012` puts the neon at ~2.4% of the cube, matching the sheet's ~2%.
+ */
+const EDGE_INSET = 0.012;
+
+/**
+ * How far above / below its flat tone a face's gloss gradient runs, in ramp
+ * steps.
+ *
+ * Deliberately small. Sampling the sheet's cube across a face gives roughly
+ * `#077AF9` at the top to `#036FF9` at the bottom — the *within*-face ramp is
+ * subtle, and what actually sells the solid is the hard value break *between*
+ * faces (top `#0DAAFB`, left `#036FF9`, right `#0040E7`). A wide gloss swamps
+ * that break and the cube goes back to reading flat, just glossier.
+ */
+const GLOSS_HOT = 2;
+const GLOSS_COOL = 2;
+
+/** Gloss gradient extent, as a fraction of the palette's reference cube size. */
+const GLOSS_SPAN = 0.62;
+
+/** Gradient stops: hot end, flat tone, cool end. */
+const GLOSS_STOPS = [0, 0.46, 1];
+
+/**
+ * Screen-space light axis, normalised.
+ *
+ * The gloss ramp runs along this on every face, so it is fixed in *screen*
+ * space and does not rotate with the cube — which is exactly right, and is the
+ * cheap half of what sells the material. Combined with the per-face Lambert
+ * tone it gives each face its own ramp with a hard value break at the seam,
+ * as the sheet has.
+ */
+const LIGHT_2D = Math.sqrt(LIGHT_X * LIGHT_X + LIGHT_Y * LIGHT_Y);
+const GLOSS_UX = LIGHT_X / LIGHT_2D;
+const GLOSS_UY = LIGHT_Y / LIGHT_2D;
+
+/** Outer halo stroked along the silhouette. */
 const BLOOM_WIDTH = 0.085;
 const BLOOM_ALPHA = 0.34;
-const TUBE_WIDTH = 0.026;
-const TUBE_ALPHA = 0.22;
-const CORE_WIDTH = 0.011;
-const CORE_MIN_WIDTH = 1.1;
 const BLOOM_SIGMA = 0.09;
 
 /**
@@ -406,27 +482,52 @@ function rgb01(hex: string): readonly [number, number, number] {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
+/**
+ * Sampled from the BLOCK ASSETS panel of `image copy 2.png` rather than
+ * eyeballed from the theme tokens, which `docs/ART_DIRECTION.md` §2 calls
+ * "tunable starting points, not fixed constants".
+ *
+ * The sheet's cube is *far* more saturated than a bevelled `#3B82F6`: the red
+ * channel is near zero everywhere on it, from `#0040E7` on the darkest face to
+ * `#0DAAFB` on the lightest. The previous `#8FCEFF` highlight carried R=0x8F,
+ * and a highlight with that much red is a wash — it is what made a lit face
+ * read as pale grey-blue plastic instead of glowing glass.
+ */
 const PLAYER_SKIN: CubeSkin = {
-  shadow: rgb01('#1B4FBF'),
-  body: rgb01('#2B7FFF'),
-  highlight: rgb01('#8FCEFF'),
-  edge: [0.88, 0.98, 1],
+  // Blue stays near maximum even on the darkest face — the sheet's shadowed
+  // face is `#0040E7`, a saturated deep blue, not a navy. Letting blue fall
+  // with green is what turns a shadowed face muddy.
+  shadow: rgb01('#0A2FE4'),
+  body: rgb01('#0B6BF8'),
+  highlight: rgb01('#12ADFD'),
+  // The sheet's hottest edge pixel, `#A6F9FF` — cyan-white, not white.
+  edge: [0.65, 0.976, 1],
   glow: rgb01(colors.collect),
 };
 
 const COLLECT_SKIN: CubeSkin = {
-  shadow: [0.05, 0.4, 0.48],
+  // Floor of the cyan ramp. Kept a legible teal rather than a near-black one:
+  // the collectible must never be mistakable for an obstacle at speed
+  // (`docs/ART_DIRECTION.md` §3), and obstacles are near-black, so a shadowed
+  // face that crushes toward black gives away exactly the wrong cue.
+  shadow: rgb01('#0A86AB'),
   body: rgb01(colors.collect),
   highlight: rgb01(colors.collectGlow),
-  edge: [0.92, 1, 1],
+  edge: [0.82, 1, 1],
   glow: rgb01(colors.collectGlow),
 };
 
+/**
+ * Sampled from the sheet's "Hit (Red)" row, for the same reason as the player
+ * skin: `#EF4444` carries equal green and blue, and a destroyed block in that
+ * red reads pink and washed at the exact moment the player needs to see it.
+ * The sheet's is `#F41A25` — far more saturated.
+ */
 const LOST_SKIN: CubeSkin = {
-  shadow: rgb01(colors.blockLostDark),
-  body: rgb01(colors.blockLost),
-  highlight: [1, 0.55, 0.48],
-  edge: [1, 0.86, 0.82],
+  shadow: rgb01('#C4101F'),
+  body: rgb01('#F2192A'),
+  highlight: rgb01('#FD6470'),
+  edge: [1, 0.93, 0.94],
   glow: rgb01(colors.blockLost),
 };
 
@@ -439,12 +540,63 @@ const FLASH_SKIN: CubeSkin = {
   glow: [1, 0.88, 0.86],
 };
 
+/**
+ * Ember ramp for hit debris.
+ *
+ * The sheet's Hit Explosion is not flat red: white-hot at the centre, grading
+ * out through orange to deep red. Debris cools along the same ramp as it flies,
+ * which is what stops the burst reading as red confetti.
+ */
+const EMBER_HOT = rgb01('#FFF3D4');
+const EMBER_MID = rgb01('#FF7A2F');
+const EMBER_COOL = rgb01(colors.blockLostDark);
+const EMBER_STEPS = 6;
+
+/** Collect Glow: warm gold, complementary to the cyan pickup so the ring and
+ *  the cube separate instead of merging into one smear. */
+const GOLD_RING = rgb01('#FFB020');
+const GOLD_CORE = rgb01('#FFF0C2');
+const GOLD_DEEP = rgb01(colors.accent);
+
+/** Star Particles: near-white core inside the collectible's own cyan. */
+const STAR_CORE: readonly [number, number, number] = [1, 1, 1];
+const STAR_GLOW = rgb01(colors.collectGlow);
+
+/**
+ * The last frames of a destroyed block: burnt out, sinking toward the
+ * background. Keeps spent debris from leaving a bright red distraction in the
+ * lane after the hit has been read.
+ */
+const SPENT_SKIN: CubeSkin = {
+  shadow: rgb01('#2A2730'),
+  body: rgb01('#4A4553'),
+  highlight: rgb01('#6E6878'),
+  edge: rgb01('#8C8698'),
+  glow: rgb01('#4A4553'),
+};
+
 type CubePalette = {
   /** `SHADE_STEPS` entries, shadow → body → highlight → edge. */
   faces: Float32Array[];
-  tube: Float32Array;
-  core: Float32Array;
+  /**
+   * Gloss gradients, memoised by ramp step and built on first use.
+   *
+   * They live in *cube-local* space — the canvas is translated to the cube's
+   * centre before a cube is drawn — so one shader serves every cube in the
+   * frame that lands on the same step. A frame of 12 blocks shows 2-3 faces
+   * each and touches maybe five distinct steps, so this is ~5 shader
+   * allocations a frame rather than ~36.
+   */
+  grad: (unknown | null)[];
+  /** Gradient filling the silhouette: the neon fillet, hottest on the lit side. */
+  edge: unknown;
   glow: Float32Array;
+  /**
+   * Cube size the gradients were built for, in px. A cube of another size
+   * still reads correctly — the gradients clamp — it just gets slightly more
+   * or less ramp across it, which is invisible on transient debris.
+   */
+  ref: number;
 };
 
 /** Enum values, passed in so the harness can supply CanvasKit's equivalents. */
@@ -454,6 +606,8 @@ export type SceneEnums = {
   blurNormal: number;
   capRound: number;
   joinRound: number;
+  /** `TileMode.Clamp`. Gloss gradients run past the cube and must not cut out. */
+  tileClamp: number;
 };
 
 export function drawScene(
@@ -471,6 +625,7 @@ export function drawScene(
   const BLUR_NORMAL = E.blurNormal;
   const CAP_ROUND = E.capRound;
   const JOIN_ROUND = E.joinRound;
+  const TILE_CLAMP = E.tileClamp;
 
       const { scale, offsetX, offsetY } = s;
 
@@ -495,23 +650,17 @@ export function drawScene(
       glowPaint.setBlendMode(BLEND_PLUS);
       glowPaint.setMaskFilter(bloomBlur);
 
-      /** Lit cube faces. */
+      /**
+       * Cube faces and the neon fillet under them. Both are gradient fills, so
+       * this paint's colour is never set — only its shader and its alpha,
+       * which Skia applies on top of the shader's own.
+       */
       const facePaint = Skia.Paint();
       facePaint.setAntiAlias(true);
 
       /**
-       * Specular sheen. Blurred, so the highlight falls off across the face
-       * like a gradient; unblurred it reads as a hard inset panel.
-       */
-      const sheenPaint = Skia.Paint();
-      sheenPaint.setAntiAlias(true);
-      sheenPaint.setMaskFilter(
-        Skia.MaskFilter.MakeBlur(BLUR_NORMAL, Math.max(0.5, cubeUnit * 0.12), true),
-      );
-
-      /**
-       * Wide blurred additive stroke along the cube's edges — shaped bloom that
-       * follows the silhouette instead of smudging a circle over it.
+       * Wide blurred additive stroke along the cube's silhouette — shaped
+       * bloom that follows the outline instead of smudging a circle over it.
        */
       const bloomPaint = Skia.Paint();
       bloomPaint.setAntiAlias(true);
@@ -520,24 +669,6 @@ export function drawScene(
       bloomPaint.setStrokeJoin(JOIN_ROUND);
       bloomPaint.setBlendMode(BLEND_PLUS);
       bloomPaint.setMaskFilter(bloomBlur);
-
-      /** Mid glow — the falloff that reads as a neon tube. */
-      const tubePaint = Skia.Paint();
-      tubePaint.setAntiAlias(true);
-      tubePaint.setStyle(STYLE_STROKE);
-      tubePaint.setStrokeCap(CAP_ROUND);
-      tubePaint.setStrokeJoin(JOIN_ROUND);
-      tubePaint.setBlendMode(BLEND_PLUS);
-
-      /**
-       * Hard near-white filament. Opaque and unblended, so the silhouette is
-       * never ambiguous whatever is behind it.
-       */
-      const corePaint = Skia.Paint();
-      corePaint.setAntiAlias(true);
-      corePaint.setStyle(STYLE_STROKE);
-      corePaint.setStrokeCap(CAP_ROUND);
-      corePaint.setStrokeJoin(JOIN_ROUND);
 
       const toX = (x: number) => x * scale + offsetX;
       const toY = (y: number) => y * scale + offsetY;
@@ -551,6 +682,22 @@ export function drawScene(
       const ny = [0, 0, 0, 0, 0, 0];
       const nz = [0, 0, 0, 0, 0, 0];
       const visible = [0, 0, 0, 0, 0, 0];
+      /** Silhouette loop: `nextV[a]` is the vertex after `a`, or -1. */
+      const nextV = [0, 0, 0, 0, 0, 0, 0, 0];
+      /** Silhouette points, in order. A cube's is a hexagon at most. */
+      const sx = [0, 0, 0, 0, 0, 0, 0, 0];
+      const sy = [0, 0, 0, 0, 0, 0, 0, 0];
+      /** One face's projected quad, and the same quad inset by the fillet. */
+      const qx = [0, 0, 0, 0];
+      const qy = [0, 0, 0, 0];
+      const fx = [0, 0, 0, 0];
+      const fy = [0, 0, 0, 0];
+      /** The silhouette grown outward by the fillet. */
+      const gx = [0, 0, 0, 0, 0, 0, 0, 0];
+      const gy = [0, 0, 0, 0, 0, 0, 0, 0];
+      /** Inward unit normal of polygon edge i, for the offset. */
+      const enx = [0, 0, 0, 0, 0, 0, 0, 0];
+      const eny = [0, 0, 0, 0, 0, 0, 0, 0];
 
       /**
        * Palettes, built once per frame and never per face.
@@ -579,7 +726,26 @@ export function drawScene(
       };
       const solid = (c: readonly [number, number, number]) => mix(c, c, 0);
 
-      const makePalette = (skin: CubeSkin): CubePalette => {
+      /**
+       * A gloss gradient in cube-local space, running along the screen light
+       * axis. `hot` sits at the lit end, `flat` at the cube's centre, `cool`
+       * at the shadowed end.
+       */
+      const glossGradient = (
+        span: number,
+        hot: Float32Array,
+        flat: Float32Array,
+        cool: Float32Array,
+      ) =>
+        Skia.Shader.MakeLinearGradient(
+          Skia.Point(GLOSS_UX * span, GLOSS_UY * span),
+          Skia.Point(-GLOSS_UX * span, -GLOSS_UY * span),
+          [hot, flat, cool],
+          GLOSS_STOPS,
+          TILE_CLAMP,
+        );
+
+      const makePalette = (skin: CubeSkin, ref: number): CubePalette => {
         const faces: Float32Array[] = [];
         for (let i = 0; i < SHADE_STEPS; i += 1) {
           const t = i / (SHADE_STEPS - 1);
@@ -593,30 +759,223 @@ export function drawScene(
                 ? mix(skin.body, skin.highlight, (t - 0.45) / 0.35)
                 : mix(skin.highlight, skin.edge, ((t - 0.8) / 0.2) * 0.3);
         }
+        const span = ref * GLOSS_SPAN;
         return {
           faces,
-          tube: mix(skin.body, skin.edge, 0.6),
-          core: solid(skin.edge),
+          grad: [],
+          // The fillet is near-white where the light hits and falls to a
+          // saturated mid-tone away from it — the sheet's edges have a lit
+          // side, they are not a uniform hairline. It never drops below
+          // `body`, so the silhouette stays a hard boundary all the way round
+          // whatever is behind it (`docs/ART_DIRECTION.md` §1).
+          edge: glossGradient(
+            span,
+            solid(skin.edge),
+            mix(skin.body, skin.edge, 0.58),
+            mix(skin.body, skin.edge, 0.38),
+          ),
           glow: solid(skin.glow),
+          ref,
         };
       };
 
-      const playerPal = makePalette(PLAYER_SKIN);
+      /** The gloss gradient for a face sitting at ramp step `step`. */
+      const faceShader = (pal: CubePalette, step: number) => {
+        const memo = pal.grad[step];
+        if (memo) return memo;
+        let hi = step + GLOSS_HOT;
+        if (hi >= SHADE_STEPS) hi = SHADE_STEPS - 1;
+        let lo = step - GLOSS_COOL;
+        if (lo < 0) lo = 0;
+        const made = glossGradient(
+          pal.ref * GLOSS_SPAN,
+          pal.faces[hi]!,
+          pal.faces[step]!,
+          pal.faces[lo]!,
+        );
+        pal.grad[step] = made;
+        return made;
+      };
+
+      // Reference sizes for the gradients. Player blocks are all one size, so
+      // theirs is exact; debris inherits it, which is right because debris is
+      // a block that came apart.
+      const blockPx = cubeUnit * CUBE_FILL;
+      const playerPal = makePalette(PLAYER_SKIN, blockPx);
       const collectPal =
-        s.collectibles.length > 0 ? makePalette(COLLECT_SKIN) : playerPal;
-      const lostPal = s.particles.length > 0 ? makePalette(LOST_SKIN) : playerPal;
+        s.collectibles.length > 0
+          ? makePalette(COLLECT_SKIN, s.collectibles[2]! * scale)
+          : playerPal;
+      const lostPal =
+        s.particles.length > 0 ? makePalette(LOST_SKIN, blockPx) : playerPal;
       const flashPal =
-        s.particles.length > 0 ? makePalette(FLASH_SKIN) : playerPal;
+        s.particles.length > 0 ? makePalette(FLASH_SKIN, blockPx) : playerPal;
 
       /**
-       * Draws one rotated, lit, glowing cube.
+       * Appends a closed polygon with rounded corners.
+       *
+       * Corners are true circular arcs: a conic whose control point is the
+       * sharp corner and whose weight is `sin(θ/2)` for interior angle θ is
+       * exactly the inscribed arc, and needs no trig — `cos θ` falls out of
+       * the dot product of the two edge directions. The tangent length is
+       * clamped to half of each edge so two adjacent corners can never eat
+       * into one another, which is what keeps grazing faces from turning into
+       * bow ties as the cube tumbles.
+       */
+      const roundPoly = (
+        path: any,
+        xs: number[],
+        ys: number[],
+        n: number,
+        r: number,
+      ) => {
+        for (let i = 0; i < n; i += 1) {
+          const px = xs[i]!;
+          const py = ys[i]!;
+          const ai = i === 0 ? n - 1 : i - 1;
+          const bi = i === n - 1 ? 0 : i + 1;
+          const d1x = xs[ai]! - px;
+          const d1y = ys[ai]! - py;
+          const d2x = xs[bi]! - px;
+          const d2y = ys[bi]! - py;
+          // Never zero: a degenerate edge collapses the corner to the vertex
+          // itself, which draws as a sharp corner rather than as NaN.
+          const l1 = Math.max(1e-4, Math.sqrt(d1x * d1x + d1y * d1y));
+          const l2 = Math.max(1e-4, Math.sqrt(d2x * d2x + d2y * d2y));
+          const u1x = d1x / l1;
+          const u1y = d1y / l1;
+          const u2x = d2x / l2;
+          const u2y = d2y / l2;
+          const t1 = r < l1 * 0.5 ? r : l1 * 0.5;
+          const t2 = r < l2 * 0.5 ? r : l2 * 0.5;
+          const t = t1 < t2 ? t1 : t2;
+
+          const cosT = u1x * u2x + u1y * u2y;
+          let w = Math.sqrt((1 - (cosT < -1 ? -1 : cosT > 1 ? 1 : cosT)) * 0.5);
+          if (w < 0.02) w = 0.02;
+
+          const q1x = px + u1x * t;
+          const q1y = py + u1y * t;
+          if (i === 0) path.moveTo(q1x, q1y);
+          else path.lineTo(q1x, q1y);
+          path.conicTo(px, py, px + u2x * t, py + u2y * t, w);
+        }
+        path.close();
+      };
+
+      /**
+       * Offsets a convex polygon by `d` — inward when positive, outward when
+       * negative — writing into `outX`/`outY`.
+       *
+       * A constant *perpendicular* offset along the polygon's own edge
+       * normals, not a scale toward the centroid. At grazing angles a face
+       * projects to a long thin sliver; scaling it toward the centroid would
+       * collapse the fillet along the sliver's long edges exactly when the
+       * cube's read is most fragile, whereas a true offset keeps the neon a
+       * constant width at every rotation.
+       *
+       * The fillet is built from both directions: the silhouette is grown
+       * outward by `d` and every face is shrunk inward by `d`, so the outline
+       * and the interior seams both come out `2d` wide. That match is the
+       * point — in the sheet they are visibly the same weight.
+       */
+      const offsetPoly = (
+        xs: number[],
+        ys: number[],
+        n: number,
+        d: number,
+        outX: number[],
+        outY: number[],
+      ) => {
+        let cxp = 0;
+        let cyp = 0;
+        for (let i = 0; i < n; i += 1) {
+          cxp += xs[i]!;
+          cyp += ys[i]!;
+        }
+        cxp /= n;
+        cyp /= n;
+
+        for (let i = 0; i < n; i += 1) {
+          const j = i === n - 1 ? 0 : i + 1;
+          let ex = ys[i]! - ys[j]!;
+          let ey = xs[j]! - xs[i]!;
+          const l = Math.sqrt(ex * ex + ey * ey);
+          if (l < 1e-4) {
+            enx[i] = 0;
+            eny[i] = 0;
+            continue;
+          }
+          ex /= l;
+          ey /= l;
+          // Point it inward. Winding flips with rotation, so this is measured
+          // per polygon rather than assumed.
+          if ((cxp - xs[i]!) * ex + (cyp - ys[i]!) * ey < 0) {
+            ex = -ex;
+            ey = -ey;
+          }
+          enx[i] = ex;
+          eny[i] = ey;
+        }
+
+        for (let i = 0; i < n; i += 1) {
+          const p = i === 0 ? n - 1 : i - 1;
+          // Miter offset: d * (n1 + n2) / (1 + n1·n2) lands exactly d from
+          // both edges.
+          const denom = 1 + enx[p]! * enx[i]! + eny[p]! * eny[i]!;
+          const toCx = cxp - xs[i]!;
+          const toCy = cyp - ys[i]!;
+          const toC = Math.sqrt(toCx * toCx + toCy * toCy);
+          let ox: number;
+          let oy: number;
+          if (denom > 0.25) {
+            ox = (d * (enx[p]! + enx[i]!)) / denom;
+            oy = (d * (eny[p]! + eny[i]!)) / denom;
+          } else if (toC > 1e-4) {
+            // Near-straight corner: the miter shoots off to infinity, so fall
+            // back to the centroid direction.
+            ox = (toCx / toC) * d;
+            oy = (toCy / toC) * d;
+          } else {
+            ox = 0;
+            oy = 0;
+          }
+          // Shrinking a sliver may never cross the centroid, or the polygon
+          // turns inside out and paints a bow tie. Growing is unbounded.
+          if (d > 0) {
+            const cap = toC * 0.6;
+            const ol = Math.sqrt(ox * ox + oy * oy);
+            if (ol > cap && ol > 1e-6) {
+              const k = cap / ol;
+              ox *= k;
+              oy *= k;
+            }
+          }
+          outX[i] = xs[i]! + ox;
+          outY[i] = ys[i]! + oy;
+        }
+      };
+
+      /**
+       * Draws one rotated, lit, glowing cube as a **rounded box**.
+       *
+       * Structure, and why: the sheet's cubes are rounded boxes with a glossy
+       * gradient per face and a thick neon fillet where faces meet. So the
+       * silhouette is filled with the fillet gradient first and each face is
+       * drawn *inset* over it. One `EDGE_INSET` therefore produces the outline
+       * and the interior seams from the same geometry — they can never
+       * disagree, no edge is ever emitted twice, and the little triangular
+       * fillet where three faces meet appears on its own, which is exactly
+       * what the sheet shows.
        *
        * Lighting is per-face and normal-based, not depth-based. The same linear
        * map that rotates the vertices is applied to the three basis vectors;
        * every face normal is ± one of those, so three vector rotations light
        * all six faces. Shading picks a *position in a colour ramp* rather than
        * scaling a multiplier, which is why a shadowed face lands on
-       * `blockDark` instead of sliding toward black.
+       * `blockDark` instead of sliding toward black. The ramp step then keys
+       * the memoised gloss gradient, so each face gets a smooth ramp of its
+       * own with a hard value break at the seam.
        *
        * Visibility culls on the normal's z, not screen winding. The previous
        * winding test was inverted — `CUBE_FACES` is wound inward, so at rest it
@@ -629,7 +988,17 @@ export function drawScene(
        * Faces of a convex solid never overlap once back faces are culled, so
        * there is no painter's sort — the old `map` + `sort` per cube is gone.
        *
-       * Draw calls: 1 bloom + 2-3 face fills + 1 tube + 1 core = 5-6.
+       * Geometry is built around the origin and the canvas is translated to
+       * the cube, so the gloss gradients live in cube-local space and are
+       * shared across every cube in the frame.
+       *
+       * Draw calls: 1 bloom + 1 fillet + 1-3 faces = **3-5**, five in the
+       * common three-face case — measured, not estimated. That is down from
+       * eight (1 bloom + 3 faces + 3 sheens + tube + core), so the rounded
+       * material costs *fewer* calls than the flat one it replaces. Gradient
+       * shaders are bounded by the number of distinct (palette, shade step)
+       * pairs in the frame, not by cube count: a live seven-cube frame builds
+       * seven, where one shader per face would have built twenty-one.
        */
       const drawCube = (
         cx: number,
@@ -662,10 +1031,11 @@ export function drawScene(
           const x = x1 * cosZ - y2 * sinZ;
           const y = x1 * sinZ + y2 * cosZ;
 
-          // Weak perspective: nearer faces grow slightly.
+          // Weak perspective: nearer faces grow slightly. Kept relative to the
+          // origin — the canvas is translated to (cx, cy) below.
           const depth = CAMERA_Z / (CAMERA_Z - z2);
-          vx[i] = cx + x * half * depth;
-          vy[i] = cy + y * half * depth;
+          vx[i] = x * half * depth;
+          vy[i] = y * half * depth;
           vz[i] = z2;
         }
 
@@ -694,29 +1064,73 @@ export function drawScene(
           visible[f] = nz[f]! > 0.0015 ? 1 : 0;
         }
 
-        // Edge geometry: one path, each visible edge exactly once.
-        const edges = Skia.Path.Make();
-        for (let e = 0; e < 48; e += 4) {
-          if (
-            visible[CUBE_EDGES[e + 2]!] === 0 &&
-            visible[CUBE_EDGES[e + 3]!] === 0
-          ) {
-            continue;
+        // Silhouette. An edge is on it when exactly one of its two faces is
+        // visible; taken in the visible face's winding those edges already
+        // form a single consistently oriented loop, so no hull and no sort.
+        for (let i = 0; i < 8; i += 1) nextV[i] = -1;
+        let start = -1;
+        for (let f = 0; f < 6; f += 1) {
+          if (visible[f] === 0) continue;
+          const face = CUBE_FACES[f]!;
+          for (let j = 0; j < 4; j += 1) {
+            if (visible[CUBE_FACE_NBR[f * 4 + j]!] !== 0) continue;
+            const a = face[j]!;
+            nextV[a] = face[(j + 1) & 3]!;
+            start = a;
           }
-          const a = CUBE_EDGES[e]!;
-          const b = CUBE_EDGES[e + 1]!;
-          edges.moveTo(vx[a]!, vy[a]!);
-          edges.lineTo(vx[b]!, vy[b]!);
         }
+        // No face faces the camera. Impossible for a cube, but a zero size or
+        // a NaN rotation would otherwise build a broken path.
+        if (start < 0) return;
 
-        // Pass 1 — bloom, behind the faces so it only shows as spill past the
-        // silhouette. Shaped, not circular: this is the emissive read.
+        let n = 0;
+        let v = start;
+        while (n < 8) {
+          sx[n] = vx[v]!;
+          sy[n] = vy[v]!;
+          n += 1;
+          const nextIdx = nextV[v]!;
+          if (nextIdx < 0 || nextIdx === start) break;
+          v = nextIdx;
+        }
+        if (n < 3) return;
+
+        const radius = size * CUBE_RADIUS;
+        // Floored in device pixels: on a small phone a cube is ~45px across,
+        // and a fillet that thins below a pixel would let the silhouette
+        // dissolve into the sky (`docs/ART_DIRECTION.md` §1).
+        const rawInset = size * EDGE_INSET;
+        const inset = rawInset < 0.6 ? 0.6 : rawInset;
+        // Outer and face radii are the nominal radius ± the fillet, so all
+        // three arcs stay concentric and the neon keeps an even width round a
+        // corner instead of pinching.
+        const faceRadius = radius - inset > 0 ? radius - inset : 0;
+
+        canvas.save();
+        canvas.translate(cx, cy);
+
+        offsetPoly(sx, sy, n, -inset, gx, gy);
+        const sil = Skia.Path.Make();
+        roundPoly(sil, gx, gy, n, radius + inset);
+
+        // Pass 1 — bloom, behind everything so it only shows as spill past
+        // the silhouette. Shaped, not circular: this is the emissive read,
+        // and it is kept tight so it cannot veil an obstacle edge behind it.
         bloomPaint.setColor(pal.glow);
         bloomPaint.setAlphaf(BLOOM_ALPHA * alpha);
         bloomPaint.setStrokeWidth(size * BLOOM_WIDTH);
-        canvas.drawPath(edges, bloomPaint);
+        canvas.drawPath(sil, bloomPaint);
 
-        // Pass 2 — lit faces.
+        // Pass 2 — the neon fillet, as a solid rounded body. Everything the
+        // inset faces do not cover reads as edge: the outline at `inset`
+        // wide, the seams at 2×, and the little triangle where three faces
+        // meet. That last one is the sheet's bright junction dot, and it
+        // arrives for free rather than being drawn.
+        facePaint.setShader(pal.edge);
+        facePaint.setAlphaf(alpha);
+        canvas.drawPath(sil, facePaint);
+
+        // Pass 3 — lit faces, inset over the fillet.
         for (let f = 0; f < 6; f += 1) {
           if (visible[f] === 0) continue;
 
@@ -744,58 +1158,22 @@ export function drawScene(
           if (step < 0) step = 0;
           else if (step >= SHADE_STEPS) step = SHADE_STEPS - 1;
 
+          qx[0] = vx[i0]!; qy[0] = vy[i0]!;
+          qx[1] = vx[i1]!; qy[1] = vy[i1]!;
+          qx[2] = vx[i2]!; qy[2] = vy[i2]!;
+          qx[3] = vx[i3]!; qy[3] = vy[i3]!;
+          offsetPoly(qx, qy, 4, inset, fx, fy);
+
           const path = Skia.Path.Make();
-          path.moveTo(vx[i0]!, vy[i0]!);
-          path.lineTo(vx[i1]!, vy[i1]!);
-          path.lineTo(vx[i2]!, vy[i2]!);
-          path.lineTo(vx[i3]!, vy[i3]!);
-          path.close();
+          roundPoly(path, fx, fy, 4, faceRadius);
 
-          facePaint.setColor(pal.faces[step]!);
-          if (alpha < 1) facePaint.setAlphaf(alpha);
+          facePaint.setShader(faceShader(pal, step));
+          facePaint.setAlphaf(alpha);
           canvas.drawPath(path, facePaint);
-
-          // Specular sheen: a smaller quad inset toward the lit corner, two
-          // ramp steps brighter. The sheet's cubes have a glossy gradient
-          // across each face; flat fills were the last thing making ours read
-          // as vector shapes rather than lit objects. One extra path per
-          // visible face, and only where the light actually falls.
-          if (diffuse > 0.25) {
-            const gx = (vx[i0]! + vx[i1]! + vx[i2]! + vx[i3]!) * 0.25;
-            const gy = (vy[i0]! + vy[i1]! + vy[i2]! + vy[i3]!) * 0.25;
-            // Pull toward the vertex nearest the light, so the sheen sits
-            // where the highlight belongs rather than dead centre.
-            const k = 0.42;
-            const sheen = Skia.Path.Make();
-            sheen.moveTo(gx + (vx[i0]! - gx) * k, gy + (vy[i0]! - gy) * k);
-            sheen.lineTo(gx + (vx[i1]! - gx) * k, gy + (vy[i1]! - gy) * k);
-            sheen.lineTo(gx + (vx[i2]! - gx) * k, gy + (vy[i2]! - gy) * k);
-            sheen.lineTo(gx + (vx[i3]! - gx) * k, gy + (vy[i3]! - gy) * k);
-            sheen.close();
-
-            let lit = step + 3;
-            if (lit >= SHADE_STEPS) lit = SHADE_STEPS - 1;
-            sheenPaint.setColor(pal.faces[lit]!);
-            sheenPaint.setAlphaf(alpha * 0.6 * diffuse);
-            canvas.drawPath(sheen, sheenPaint);
-          }
         }
 
-        // Pass 3 — mid glow along every visible edge.
-        tubePaint.setColor(pal.tube);
-        tubePaint.setAlphaf(TUBE_ALPHA * alpha);
-        tubePaint.setStrokeWidth(size * TUBE_WIDTH);
-        canvas.drawPath(edges, tubePaint);
-
-        // Pass 4 — the filament. Also draws the interior seam, which is what
-        // turns three flat quads into a legible tumbling cube.
-        corePaint.setColor(pal.core);
-        corePaint.setAlphaf(alpha);
-        const coreWidth = size * CORE_WIDTH;
-        corePaint.setStrokeWidth(
-          coreWidth < CORE_MIN_WIDTH ? CORE_MIN_WIDTH : coreWidth,
-        );
-        canvas.drawPath(edges, corePaint);
+        facePaint.setShader(null);
+        canvas.restore();
       };
 
       // --- Background: neon night city ---
@@ -1391,49 +1769,225 @@ export function drawScene(
         );
       }
 
-      // --- Particles: tumbling debris, the detached block, and sparkles. ---
+      // --- Particles ---
+      //
+      // The effects of the sheet's EFFECTS & PARTICLES panel. The simulation
+      // decides what exists (`src/game/engine/Particles.ts`); this decides what
+      // each kind looks like.
+      //
+      //   Hit Explosion   FLASH  hot additive core, gone in ~0.18s
+      //                   SHARD  chunky angular flakes, cooling as they fly
+      //   Block Destroy   CORE   the block: flash -> spin away -> fall & grey
+      //                   CHUNK  blue cube fragments, tumbling and shrinking
+      //   Star Particles  STAR   four-pointed sparkles, never plain dots
+      //   Collect Glow    RING   counter-rotating gold swirl
+      //
+      // Two passes, because the pool hands out whichever slot is free and pool
+      // order therefore says nothing about draw order. Pass 1 is the additive
+      // light, pass 2 the solid pieces that sit inside it. Without the split a
+      // flash landing in a low slot lights debris from an older burst and skips
+      // its own.
       const particles = s.particles;
-      for (let i = 0; i < particles.length; i += PARTICLE_STRIDE) {
-        const px2 = toX(particles[i]!);
-        const py2 = toY(particles[i + 1]!);
-        const size = particles[i + 2]! * scale;
-        const rotation = particles[i + 3]!;
-        const alpha = particles[i + 4]!;
-        const kind = particles[i + 5]!;
 
-        if (kind === PARTICLE_STAR) {
-          paint.setColor(Skia.Color(colors.collectGlow));
-          paint.setAlphaf(alpha);
-          canvas.drawCircle(px2, py2, size * (0.4 + alpha * 0.6), paint);
-          continue;
+      if (particles.length > 0) {
+        // Built once per frame. A shard then costs an indexed lookup, where
+        // per-particle `Skia.Color(string)` parsing would cost a string parse
+        // every frame.
+        const ember: Float32Array[] = [];
+        for (let i = 0; i < EMBER_STEPS; i += 1) {
+          const t = i / (EMBER_STEPS - 1);
+          ember[i] =
+            t < 0.55
+              ? mix(EMBER_COOL, EMBER_MID, t / 0.55)
+              : mix(EMBER_MID, EMBER_HOT, (t - 0.55) / 0.45);
+        }
+        const goldGlow = solid(GOLD_DEEP);
+        const goldRing = solid(GOLD_RING);
+        const goldCore = solid(GOLD_CORE);
+        const starGlow = solid(STAR_GLOW);
+        const starCore = solid(STAR_CORE);
+        const spentPal = makePalette(SPENT_SKIN, blockPx);
+
+        // Pass 1 — additive light.
+        for (let i = 0; i < particles.length; i += PARTICLE_STRIDE) {
+          const kind = particles[i + 5]!;
+          if (kind !== PARTICLE_FLASH && kind !== PARTICLE_STAR) continue;
+
+          const px2 = toX(particles[i]!);
+          const py2 = toY(particles[i + 1]!);
+          const size = particles[i + 2]! * scale;
+          const alpha = particles[i + 4]!;
+          if (size <= 0 || px2 < -size * 3 || px2 > width + size * 3) continue;
+
+          if (kind === PARTICLE_FLASH) {
+            // Additive and blurred on purpose — an opaque disc this size is
+            // exactly the "effect that obscures an obstacle" that
+            // `docs/GAME_DESIGN.md` §11 rules out.
+            glowPaint.setColor(ember[1]!);
+            glowPaint.setAlphaf(0.34 * alpha);
+            canvas.drawCircle(px2, py2, size * 0.62, glowPaint);
+            // Squared falloff: the hot core is the first frames and little else.
+            glowPaint.setColor(ember[EMBER_STEPS - 1]!);
+            glowPaint.setAlphaf(0.5 * alpha * alpha);
+            canvas.drawCircle(px2, py2, size * 0.3, glowPaint);
+          } else {
+            glowPaint.setColor(starGlow);
+            glowPaint.setAlphaf(0.42 * alpha);
+            canvas.drawCircle(px2, py2, size * 1.5, glowPaint);
+          }
         }
 
-        if (kind === PARTICLE_CORE) {
-          // Stage 2: white-hot on the first frames, then red. The destruction
-          // cue is load-bearing feedback, not decoration.
-          drawCube(
-            px2,
-            py2,
-            size,
-            rotation * 0.7,
-            rotation,
-            0,
-            alpha > 0.88 ? flashPal : lostPal,
-            alpha,
-          );
-          continue;
-        }
+        // Pass 2 — solid pieces.
+        for (let i = 0; i < particles.length; i += PARTICLE_STRIDE) {
+          const kind = particles[i + 5]!;
+          if (kind === PARTICLE_FLASH) continue; // drawn in pass 1
 
-        paint.setColor(Skia.Color(colors.blockLost));
-        paint.setAlphaf(alpha);
-        canvas.save();
-        canvas.translate(px2, py2);
-        canvas.rotate((rotation * 180) / Math.PI, 0, 0);
-        canvas.drawRect(
-          Skia.XYWHRect(-size / 2, -size / 2, size, size),
-          paint,
-        );
-        canvas.restore();
+          const px2 = toX(particles[i]!);
+          const py2 = toY(particles[i + 1]!);
+          const size = particles[i + 2]! * scale;
+          const rotation = particles[i + 3]!;
+          const alpha = particles[i + 4]!;
+          const seed = particles[i + 6]!;
+          if (size <= 0.25) continue;
+          if (px2 < -size * 3 || px2 > width + size * 3) continue;
+
+          if (kind === PARTICLE_RING) {
+            // A tilted ring that expands, swirls and fades. Built as a 16-gon
+            // polyline; at this radius the facets are invisible.
+            const rx = size;
+            const ry = size * 0.42; // tilt, so it reads as an orbit not a bubble
+            const ca = Math.cos(rotation);
+            const sa = Math.sin(rotation);
+            const ring = Skia.Path.Make();
+            for (let k = 0; k <= 16; k += 1) {
+              const a = (k / 16) * Math.PI * 2;
+              const ux = Math.cos(a) * rx;
+              const uy = Math.sin(a) * ry;
+              const rxp = px2 + ux * ca - uy * sa;
+              const ryp = py2 + ux * sa + uy * ca;
+              if (k === 0) ring.moveTo(rxp, ryp);
+              else ring.lineTo(rxp, ryp);
+            }
+
+            // Fades on alpha squared: the ring is widest exactly when it is
+            // faintest, so it can never become a bright hoop across the lane.
+            const fade = alpha * alpha;
+            // Two strokes: a wide soft halo, then a narrower brighter band.
+            // One stroke reads as a flat hoop; the pair gives the falloff that
+            // makes it a swirl of light.
+            bloomPaint.setColor(goldGlow);
+            bloomPaint.setAlphaf(0.5 * fade);
+            bloomPaint.setStrokeWidth(Math.max(2, size * 0.2));
+            canvas.drawPath(ring, bloomPaint);
+
+            bloomPaint.setColor(goldRing);
+            bloomPaint.setAlphaf(0.75 * fade);
+            bloomPaint.setStrokeWidth(Math.max(1.2, size * 0.07));
+            canvas.drawPath(ring, bloomPaint);
+
+            // A bright head chasing round the ring — this is what turns a
+            // static hoop into the sheet's swirl.
+            const ha = rotation * 3;
+            const hx = Math.cos(ha) * rx;
+            const hy = Math.sin(ha) * ry;
+            facePaint.setColor(goldCore);
+            facePaint.setAlphaf(fade);
+            facePaint.setShader(null);
+            canvas.drawCircle(
+              px2 + hx * ca - hy * sa,
+              py2 + hx * sa + hy * ca,
+              Math.max(1, size * 0.1),
+              facePaint,
+            );
+            continue;
+          }
+
+          if (kind === PARTICLE_STAR) {
+            // Four-pointed sparkle. The long thin spikes *are* the shape —
+            // much above this inner radius it stops being a star and becomes
+            // the blob the old plain dots were.
+            const star = Skia.Path.Make();
+            for (let k = 0; k < 8; k += 1) {
+              const a = rotation + (k * Math.PI) / 4;
+              const r = k % 2 === 0 ? size : size * 0.19;
+              const sx = px2 + Math.cos(a) * r;
+              const sy = py2 + Math.sin(a) * r;
+              if (k === 0) star.moveTo(sx, sy);
+              else star.lineTo(sx, sy);
+            }
+            star.close();
+
+            facePaint.setShader(null);
+            facePaint.setColor(starGlow);
+            facePaint.setAlphaf(0.9 * alpha);
+            canvas.drawPath(star, facePaint);
+            facePaint.setColor(starCore);
+            facePaint.setAlphaf(alpha);
+            canvas.drawCircle(px2, py2, Math.max(0.8, size * 0.2), facePaint);
+            continue;
+          }
+
+          if (kind === PARTICLE_CORE) {
+            // The sheet's five stages carried by one cube: white-hot on the
+            // first frames, red as it tumbles, burnt-out grey as it falls away.
+            drawCube(
+              px2,
+              py2,
+              size,
+              rotation * 0.7,
+              rotation,
+              rotation * 0.3,
+              alpha > 0.88 ? flashPal : alpha < 0.32 ? spentPal : lostPal,
+              alpha,
+            );
+            continue;
+          }
+
+          if (kind === PARTICLE_CHUNK) {
+            // A fragment of the player's own stack, in the player's own
+            // palette. That is the point: the red explosion says a hit
+            // happened, these say what it cost. `seed` offsets the tumble so
+            // fragments of one block never rotate in lockstep.
+            drawCube(
+              px2,
+              py2,
+              size,
+              rotation * 0.8 + seed * 2,
+              rotation,
+              rotation * 0.5,
+              playerPal,
+              alpha,
+            );
+            continue;
+          }
+
+          // Hit debris: a chunky angular flake cooling from white-hot to deep
+          // red across its life. Five vertices at radii varied by the
+          // particle's stable seed, so no two flakes share a silhouette and
+          // none reads as the tidy axis-aligned square this used to draw.
+          let step = (alpha * EMBER_STEPS) | 0;
+          if (step < 0) step = 0;
+          else if (step >= EMBER_STEPS) step = EMBER_STEPS - 1;
+
+          const flake = Skia.Path.Make();
+          const half = size * 0.5;
+          for (let k = 0; k < 5; k += 1) {
+            const a = rotation + (k * Math.PI * 2) / 5;
+            const r = half * (0.55 + 0.45 * (((seed * 97 + k * 31) % 10) / 10));
+            const fx = px2 + Math.cos(a) * r;
+            const fy = py2 + Math.sin(a) * r;
+            if (k === 0) flake.moveTo(fx, fy);
+            else flake.lineTo(fx, fy);
+          }
+          flake.close();
+
+          facePaint.setShader(null);
+          facePaint.setColor(ember[step]!);
+          // Holds most of its opacity until late: debris that fades linearly
+          // reads as smoke, debris that holds and then goes reads as solid.
+          facePaint.setAlphaf(0.3 + 0.7 * alpha);
+          canvas.drawPath(flake, facePaint);
+        }
       }
 
       canvas.restore();

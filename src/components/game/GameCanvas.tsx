@@ -10,6 +10,7 @@ import {
   Skia,
   StrokeCap,
   StrokeJoin,
+  TileMode,
   createPicture,
   vec,
 } from '@shopify/react-native-skia';
@@ -43,6 +44,7 @@ const ENUMS: SceneEnums = {
   blurNormal: BlurStyle.Normal,
   capRound: StrokeCap.Round,
   joinRound: StrokeJoin.Round,
+  tileClamp: TileMode.Clamp,
 };
 
 /**

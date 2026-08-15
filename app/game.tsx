@@ -1,15 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { AppState, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GameCanvasHost } from '@/components/game/GameCanvasHost';
 import { FeedbackBanner, type BannerKind } from '@/components/ui/FeedbackBanner';
+import { GameOverOverlay } from '@/components/ui/GameOverOverlay';
 import { HUD } from '@/components/ui/HUD';
 import { PauseOverlay } from '@/components/ui/PauseOverlay';
-import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import type { FrameEvents } from '@/game/engine/GameEngine';
+import { distanceToScore } from '@/game/systems/ScoreManager';
 import { useGameLoop } from '@/hooks/useGameLoop';
 import { useKeyboardControls } from '@/hooks/useKeyboardControls';
 import { useVerticalDrag } from '@/hooks/useVerticalDrag';
@@ -24,7 +25,7 @@ import { loadHighScores, recordDistance } from '@/storage/highScore';
 import { loadSettings, saveSettings } from '@/storage/settings';
 import { DIFFICULTIES, type Difficulty } from '@/game/types';
 import { colors } from '@/theme/colors';
-import { absoluteFill, layout, spacing, typography } from '@/theme/spacing';
+import { absoluteFill } from '@/theme/spacing';
 
 function parseDifficulty(value: string | string[] | undefined): Difficulty {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -218,23 +219,14 @@ export default function GameScreen() {
         ) : null}
 
         {hud.gameOver ? (
-          <View style={styles.gameOver}>
-            <Text style={styles.gameOverTitle}>GAME OVER</Text>
-
-            <View style={styles.statBlock}>
-              <Text style={styles.statLabel}>SCORE</Text>
-              <Text style={styles.statValue}>{hud.score}</Text>
-            </View>
-            <View style={styles.statBlock}>
-              <Text style={styles.statLabel}>BEST</Text>
-              <Text style={styles.statBest}>{Math.floor(best / 10)}</Text>
-            </View>
-
-            <View style={styles.actions}>
-              <PrimaryButton label="RETRY" variant="accent" onPress={handleRestart} />
-              <PrimaryButton label="HOME" variant="neutral" onPress={handleHome} />
-            </View>
-          </View>
+          // `best` is stored in world units; the overlay is handed display
+          // units so it never has to know the conversion.
+          <GameOverOverlay
+            score={hud.score}
+            best={distanceToScore(best)}
+            onRetry={handleRestart}
+            onHome={handleHome}
+          />
         ) : null}
       </SafeAreaView>
     </View>
@@ -244,44 +236,4 @@ export default function GameScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   overlay: { ...absoluteFill },
-  gameOver: {
-    ...absoluteFill,
-    backgroundColor: 'rgba(11, 11, 18, 0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-  },
-  gameOverTitle: {
-    color: colors.danger,
-    fontSize: typography.screenTitle,
-    fontWeight: '900',
-    letterSpacing: 2,
-    marginBottom: spacing.sm,
-  },
-  statBlock: { alignItems: 'center' },
-  statLabel: {
-    color: colors.textDim,
-    fontSize: typography.hudLabel,
-    fontWeight: '600',
-    letterSpacing: 1.5,
-  },
-  statValue: {
-    color: colors.text,
-    fontSize: 42,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  statBest: {
-    color: colors.collect,
-    fontSize: 26,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  actions: {
-    width: '100%',
-    maxWidth: layout.columnWidth,
-    alignItems: 'center',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
 });

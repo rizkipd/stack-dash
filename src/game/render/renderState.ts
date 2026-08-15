@@ -23,7 +23,15 @@ import type { GameEngine } from '../engine/GameEngine';
 export const BLOCK_STRIDE = 7; // x, y, size, rotX, rotY, rotZ, trail
 export const OBSTACLE_STRIDE = 4; // x, y, width, height
 export const COLLECTIBLE_STRIDE = 4; // x, y, size, pulse
-export const PARTICLE_STRIDE = 6; // x, y, size, rotation, alpha, kind
+/**
+ * x, y, size, rotation, alpha, kind, seed.
+ *
+ * `seed` is a stable 0..1 value fixed at spawn. It is here because pool slots
+ * are handed out by availability, so a particle's index in this array shifts as
+ * its neighbours die — deriving a shard's silhouette from its index would make
+ * that silhouette flicker frame to frame.
+ */
+export const PARTICLE_STRIDE = 7;
 
 export type RenderState = {
   blocks: number[];
@@ -96,15 +104,17 @@ const PHASE_PER_BLOCK = 0.011;
  * every cube tip forward onto its top face, and the stack looked like a pile
  * of flat slabs.
  *
- * ~17 deg gives the three-quarter read of the reference without so much top
- * face that the front one gets crushed.
+ * ~30 deg matches the sheet's isometric. It was ~17, which at rotations near
+ * multiples of 90 deg made the cube read as a rounded tile with a thin top lip
+ * rather than a chunky three-quarter cube — the last structural cause of the
+ * whole thing looking flat. The front face still reads clearly at 30.
  *
  * **Negative on purpose.** World −y renders upward on screen, so a positive
  * angle tips the cube onto its *underside* — which is what shipped, lighting
  * the scene from above while showing the one face the light never reaches.
  * Caught by rendering the app icon, where a lone cube made it obvious.
  */
-const VIEW_ELEVATION = -0.3;
+const VIEW_ELEVATION = -0.52;
 
 /**
  * Packs the engine's current state for the renderer.
@@ -213,6 +223,7 @@ export function buildRenderState(
     out.particles[pi + 3] = particle.rotation;
     out.particles[pi + 4] = Math.max(0, particle.life / particle.maxLife);
     out.particles[pi + 5] = particle.kind;
+    out.particles[pi + 6] = particle.seed;
     pi += PARTICLE_STRIDE;
   }
 

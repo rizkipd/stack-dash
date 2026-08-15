@@ -112,7 +112,11 @@ dependency.
 | Role | Treatment |
 | --- | --- |
 | Title `STACK DASH` | Two lines, ~48pt, 900 weight. `STACK` white, `DASH` blue-cyan gradient |
-| Screen title | ~32pt, 800, `danger` for GAME OVER, `primary` for PAUSED |
+| Screen title | ~32pt, 800, `danger` for GAME OVER, white for PAUSED |
+
+PAUSED is white with a `primary` glow beneath it, not `primary` text. The
+sheet draws it white, and RESUME sits directly under it in `primary` — two
+blues stacked flattens the hierarchy and the title stops leading.
 | Buttons | ~18pt, 700, uppercase, ~1.5px tracking |
 | HUD value | ~28pt, 800, tabular figures so digits don't jitter |
 | HUD label | ~12pt, 600, `textDim`, uppercase |

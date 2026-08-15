@@ -91,7 +91,19 @@ export class GameEngine {
   shake = 0;
 
   readonly seed: number;
+  /** Drives level generation. Nothing decorative may draw from this. */
   private rng: Rng;
+
+  /**
+   * Drives particles only.
+   *
+   * Effects used to share the generator's stream, which meant changing a
+   * particle count silently changed the obstacle layout every seed produced —
+   * a purely cosmetic tweak would rewrite the level. Derived from the same seed
+   * so runs stay reproducible, but stepped independently so game feel and level
+   * design can be tuned without touching each other.
+   */
+  private fxRng: Rng;
 
   /** World x at which the next obstacle spawns. */
   private nextSpawnX: number;
@@ -105,6 +117,8 @@ export class GameEngine {
     this.difficulty = options.difficulty;
     this.seed = options.seed ?? createSeed();
     this.rng = createRng(this.seed);
+    // Offset by the golden-ratio constant so the two streams do not correlate.
+    this.fxRng = createRng((this.seed ^ 0x9e3779b9) >>> 0);
 
     const config = getDifficultyConfig(options.difficulty);
     this.stack = {
@@ -149,7 +163,9 @@ export class GameEngine {
     const config = getDifficultyConfig(difficulty);
     this.phase = 'ready';
     this.difficulty = difficulty;
-    this.rng = createRng(seed ?? createSeed());
+    const nextSeed = seed ?? createSeed();
+    this.rng = createRng(nextSeed);
+    this.fxRng = createRng((nextSeed ^ 0x9e3779b9) >>> 0);
     this.stack = {
       x: gameplay.playerX,
       y: gameplay.worldHeight / 2,
@@ -214,7 +230,7 @@ export class GameEngine {
     let blocksLost = 0;
     const { hitIndices, hitRects } = detectCollisions(this.stack, this.obstacles);
     if (hitIndices.length > 0) {
-      for (const rect of hitRects) burst(this.particles, rect, this.rng);
+      for (const rect of hitRects) burst(this.particles, rect, this.fxRng);
       this.stack = removeBlocks(this.stack, hitIndices);
       blocksLost = hitIndices.length;
       this.blocksLost += blocksLost;
@@ -230,7 +246,7 @@ export class GameEngine {
       const { collectibles, gained } = collect(this.collectibles, touched);
       this.collectibles = collectibles;
       for (const item of touched) {
-        sparkle(this.particles, item.x, item.y, item.size, this.rng);
+        sparkle(this.particles, item.x, item.y, item.size, this.fxRng);
       }
       for (let i = 0; i < gained; i += 1) this.stack = addBlock(this.stack);
       blocksGained = gained;
