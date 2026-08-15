@@ -101,8 +101,13 @@ const CUBE_FILL = 0.88;
 //      with only a few 1px sparkles, because that is where an approaching wall
 //      must be picked out earliest.
 
-/** Ground line, as a fraction of canvas height. The skyline stands on it. */
-const HORIZON = 0.82;
+/**
+ * Ground line, as a fraction of canvas height. The skyline stands on it.
+ *
+ * The sheet's gameplay screens show the road as a narrow near strip, roughly a
+ * tenth of the frame — enough to ground the stack without eating play field.
+ */
+const HORIZON = 0.88;
 
 /**
  * Global parallax/drift multiplier.
@@ -167,7 +172,13 @@ const background = {
    * Road kerb. Thin by design: a large light band here would eat the player
    * block's contrast, which is the opposite of what the ground is for.
    */
-  kerb: '#9AA3BF',
+  kerb: '#C3CBDF',
+  /**
+   * Road surface. Light enough that near-black obstacles read against it as
+   * silhouettes — the sheet's gameplay screens show the stack and the walls
+   * standing on a lit, reflective floor, not floating over a void.
+   */
+  road: '#6E7793',
   /** Street lights — brightest element, and the cue separating field from sky. */
   lamp: colors.accent,
   lampCore: '#FFC864',
@@ -961,17 +972,43 @@ export function drawScene(
       const upH = Math.round(height * 0.035);
       fill(0, horizonY - upH, width, upH);
 
-      // Ground / road. Kept near-black: an obstacle growing from the bottom
-      // edge is *lighter* than this, which is where its contrast down here
-      // comes from.
-      bgPaint.setColor(Skia.Color(colors.ground));
+      // Ground / road — a lit, reflective surface, as in the sheet's gameplay
+      // screens and its Ground/Road layer. It was near-black here, which lost
+      // the floor the stack and the walls visibly stand on.
+      //
+      // Contrast still works, just inverted: obstacles are near-black charcoal,
+      // so against a light road they read as dark silhouettes rather than
+      // dark-on-dark.
+      const groundH = height - horizonY;
+      bgPaint.setColor(Skia.Color(background.road));
       bgPaint.setAlphaf(1);
-      fill(0, horizonY, width, height - horizonY);
+      fill(0, horizonY, width, groundH);
 
-      const kerbH = Math.max(2, Math.round(height * 0.006));
-      const kerbY = horizonY + 3;
+      // Vertical falloff: brightest where the road meets the city, sinking
+      // toward the near edge, which is what gives it a receding surface.
+      const bands = 7;
+      bgPaint.setColor(Skia.Color(colors.ground));
+      for (let k = 0; k < bands; k += 1) {
+        const y0 = Math.round(horizonY + (groundH * k) / bands);
+        const y1 = Math.round(horizonY + (groundH * (k + 1)) / bands);
+        bgPaint.setAlphaf(0.1 + 0.62 * (k / (bands - 1)));
+        fill(0, y0, width, y1 - y0);
+      }
+
+      // Wet-surface reflection: a soft magenta smear of the city, brightest
+      // just below the horizon.
+      bgPaint.setColor(Skia.Color(background.uplight));
+      for (let k = 0; k < 4; k += 1) {
+        const y0 = Math.round(horizonY + (groundH * k) / 10);
+        const y1 = Math.round(horizonY + (groundH * (k + 1)) / 10);
+        bgPaint.setAlphaf(0.16 * (1 - k / 4));
+        fill(0, y0, width, y1 - y0);
+      }
+
+      const kerbH = Math.max(2, Math.round(height * 0.007));
+      const kerbY = horizonY;
       bgPaint.setColor(Skia.Color(background.kerb));
-      bgPaint.setAlphaf(0.55);
+      bgPaint.setAlphaf(0.85);
       fill(0, kerbY, width, kerbH);
 
       // Street lights: fastest parallax layer, brightest element in the frame.

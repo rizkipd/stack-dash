@@ -1,33 +1,25 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenBackdrop } from '@/components/ui/ScreenBackdrop';
 import { configureFeedback, feedback, initFeedback } from '@/feedback';
-import { DIFFICULTIES } from '@/game/types';
-import { loadHighScores } from '@/storage/highScore';
 import { loadSettings } from '@/storage/settings';
 import { colors } from '@/theme/colors';
 import { layout, spacing } from '@/theme/spacing';
 
 /** Main Menu — MVP Screen 2. */
 export default function MainMenuScreen() {
-  const [best, setBest] = useState(0);
-
   // Preload audio here so the first tap in-game is not what pays for decoding
   // every cue.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [settings, scores] = await Promise.all([
-        loadSettings(),
-        loadHighScores(),
-      ]);
+      const settings = await loadSettings();
       if (cancelled) return;
       configureFeedback(settings);
-      setBest(Math.max(...DIFFICULTIES.map((d) => scores[d])));
       void initFeedback();
     })();
     return () => {
@@ -40,13 +32,6 @@ export default function MainMenuScreen() {
       <ScreenBackdrop offset={2400} />
 
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.bestChip}>
-            <Text style={styles.bestLabel}>BEST</Text>
-            <Text style={styles.bestValue}>{Math.floor(best / 10)}</Text>
-          </View>
-        </View>
-
         <View style={styles.titleBlock}>
           {/*
             The real wordmark, extracted from the design sheet by
@@ -61,7 +46,6 @@ export default function MainMenuScreen() {
             accessibilityRole="image"
             accessibilityLabel="Stack Dash"
           />
-          <Text style={styles.tagline}>AVOID THE WALLS · KEEP YOUR BLOCKS</Text>
         </View>
 
         <View style={styles.menu}>
@@ -180,14 +164,17 @@ const styles = StyleSheet.create({
 
   iconRow: { flexDirection: 'row', gap: spacing.md },
   iconButton: {
-    width: layout.minTouchTarget,
-    height: layout.minTouchTarget,
-    borderRadius: layout.minTouchTarget / 2,
-    backgroundColor: 'rgba(22,22,31,0.85)',
+    width: layout.minTouchTarget + 6,
+    height: layout.minTouchTarget + 6,
+    // Rounded squares, matching the sheet — circles read as a different
+    // control family from the primary buttons above them.
+    borderRadius: 14,
+    backgroundColor: 'rgba(31,31,48,0.92)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconDim: { opacity: 0.4 },
+  // Post-MVP, so visibly subordinate — but not so faint it looks broken.
+  iconDim: { opacity: 0.55 },
   iconPressed: { opacity: 0.6 },
   iconGlyph: { fontSize: 18 },
 });
