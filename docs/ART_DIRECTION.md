@@ -71,9 +71,24 @@ them on MVP UI.
 
 ## 3. Objects
 
-**Player block.** Square, faux-3D: flat front face, lighter top bevel,
-darker right bevel. Blocks stack flush with a 1px seam so the count
-stays countable at a glance. Corner radius roughly 12% of block size.
+**Player block.** A genuinely 3D cube in **continuous 360° rotation** about
+the X and Y axes, per the asset sheet. Eight vertices are rotated, projected
+with weak perspective, and the visible faces drawn back-to-front with
+depth-based shading — faking it with a fixed bevel reads as a flat hexagon
+once the cube turns.
+
+Three details carry the effect, and all three matter:
+
+-   **Phase offset.** Each block is offset ~0.085 of a revolution from its
+    neighbour. Without it the stack spins as one rigid object.
+-   **Rotation tracks speed.** Spin rate rises with the difficulty tier and
+    again with the in-run ramp — rotation is how speed is *felt*.
+-   **Idle bob.** A small sine offset per block, so the stack breathes even
+    when the player is still.
+
+The stack also **trails and leans**: vertical velocity ripples up the stack as
+a whip, with higher blocks lagging further behind. This is what makes the stack
+read as one object with mass rather than a rigid bar.
 
 > **Block colour must be a render parameter, not a constant.** This is
 > what makes post-MVP skins a config change instead of a refactor.

@@ -20,88 +20,88 @@ begin M1 until M0 is signed off** (`MASTER_PROMPT.md` stop condition).
 
 ## M1 --- Core Stack & Input
 
--   [ ] Render vertical stack
--   [ ] Configure starting block count
--   [ ] Implement vertical drag
--   [ ] Clamp to gameplay bounds
--   [ ] Implement automatic forward/world movement
+-   [x] Render vertical stack
+-   [x] Configure starting block count
+-   [x] Implement vertical drag
+-   [x] Clamp to gameplay bounds
+-   [x] Implement automatic forward/world movement
 
 **Acceptance:** player can smoothly move stack up/down while game
 advances automatically.
 
 ## M2 --- Obstacles & Collision
 
--   [ ] Implement obstacle entity
--   [ ] Implement initial patterns
--   [ ] Spawn obstacles ahead
--   [ ] Per-block collision
--   [ ] Remove only collided blocks
--   [ ] Add collision feedback
+-   [x] Implement obstacle entity
+-   [x] Implement initial patterns
+-   [x] Spawn obstacles ahead
+-   [x] Per-block collision
+-   [x] Remove only collided blocks
+-   [x] Add collision feedback
 
 **Acceptance:** partial collision removes only touching blocks;
 surviving blocks continue.
 
 ## M3 --- Lifecycle
 
--   [ ] READY
--   [ ] PLAYING
--   [ ] PAUSED
--   [ ] GAME_OVER
--   [ ] Retry
--   [ ] Home
+-   [x] READY
+-   [x] PLAYING
+-   [x] PAUSED
+-   [x] GAME_OVER
+-   [x] Retry
+-   [x] Home
 
 **Acceptance:** reaching zero triggers Game Over once; Retry fully
 resets run.
 
 ## M4 --- Controlled Random Generation
 
--   [ ] Pattern library
--   [ ] Seedable RNG
--   [ ] Pattern variation
--   [ ] Fairness validator
--   [ ] Offscreen cleanup
+-   [x] Pattern library
+-   [x] Seedable RNG
+-   [x] Pattern variation
+-   [x] Fairness validator
+-   [x] Offscreen cleanup
 
 **Acceptance:** randomized sequences remain valid under automated
 generation tests.
 
 ## M5 --- Collectible Blocks
 
--   [ ] Spawn +1 collectible
--   [ ] Detect collection
--   [ ] Add block
--   [ ] Collect animation/SFX
+-   [x] Spawn +1 collectible
+-   [x] Detect collection
+-   [x] Add block
+-   [x] Collect animation/SFX
 
 **Acceptance:** collectible increases stack by exactly one and cannot be
 collected twice.
 
 ## M6 --- Difficulty & Score
 
--   [ ] Distance score
--   [ ] Best score
--   [ ] Easy/Medium/Hard config
--   [ ] Distance-based speed scaling
--   [ ] Frequency/gap scaling
--   [ ] Local persistence
+-   [x] Distance score
+-   [x] Best score
+-   [x] Easy/Medium/Hard config
+-   [x] Distance-based speed scaling
+-   [x] Frequency/gap scaling
+-   [x] Local persistence
 
 ## M7 --- UI/UX
 
--   [ ] Main Menu
--   [ ] Difficulty Select
--   [ ] HUD
--   [ ] Pause overlay
--   [ ] Game Over
--   [ ] Settings
--   [ ] Safe-area support
+-   [x] Main Menu
+-   [x] Difficulty Select
+-   [x] HUD
+-   [x] Pause overlay
+-   [x] Game Over
+-   [x] Settings
+-   [x] Safe-area support
 
 ## M8 --- Polish
 
--   [ ] Particles
--   [ ] Haptics
--   [ ] Sound
--   [ ] Music
--   [ ] Block break animation
--   [ ] Collect animation
--   [ ] UI transitions
+-   [x] Particles
+-   [x] Haptics
+-   [x] Sound
+-   [x] Music
+-   [x] Block break animation
+-   [x] Collect animation
+-   [x] UI transitions
 
 ## M9 --- Mobile QA
 

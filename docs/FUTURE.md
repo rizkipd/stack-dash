@@ -55,6 +55,31 @@ under MVP Non-Goals. It is captured here in full.
 -   Daily challenge with a fixed seed --- cheap and natural, since the
     generator is seeded from day one (see `docs/ARCHITECTURE.md` §8)
 
+## Parked from the asset & sound sheets (2026-08-15)
+
+The later reference sheets introduced mechanics beyond the Locked Core
+Concept. The Product Owner ruled **visual and feedback elements in, rule
+changes out**, so these are recorded rather than built:
+
+-   **Hearts / lives** (`❤️❤️🖤` in the HUD mock). A second health pool
+    directly contradicts "0 blocks = Game Over" being the only fail
+    state. Would need an amendment to the Locked Core Concept.
+-   **Shield (1 hit)** power-up. Absorbing a collision contradicts "only
+    blocks that geometrically collide are removed".
+-   **Magnet (attract)** power-up. Needs a timed power-up state machine.
+-   **+3 Blocks (gold)** collectible. The smallest of these — one extra
+    type and a spawn weight — but the locked concept specifies
+    collectibles add *one* block.
+-   **Combo multiplier** (`COMBO x2`, `x3`) and **near-miss** scoring.
+-   **Level counter** and the "Next Speed Up" progress bar. The MVP ramps
+    difficulty continuously with distance rather than in discrete levels.
+-   **Achievement unlock** cue and screen.
+
+What *was* built from those sheets, being purely presentational: 360°
+cube rotation, per-block phase offset, speed trails, glow, parallax
+layers, hit explosion, star particles, screen shake, the
+GREAT!/OOPS!/NEW BEST! banners, and the full audio cue set.
+
 ## Parked from `docs/GAME_DESIGN.md` §14
 
 Gameplay ideas that extend the locked concept rather than monetise it:

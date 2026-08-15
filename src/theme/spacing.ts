@@ -18,6 +18,20 @@ export const layout = {
   minTouchTarget: 44,
 } as const;
 
+/**
+ * Absolute fill.
+ *
+ * `StyleSheet.absoluteFillObject` is gone from React Native 0.86's types, and
+ * `absoluteFill` is a registered style id that cannot be spread.
+ */
+export const absoluteFill = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+} as const;
+
 export const typography = {
   title: 48,
   screenTitle: 32,

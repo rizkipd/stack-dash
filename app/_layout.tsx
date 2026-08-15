@@ -26,8 +26,9 @@ export default function RootLayout() {
         >
           <Stack.Screen name="index" />
           <Stack.Screen name="difficulty" />
+          {/* Game Over and Pause are overlays inside `game`, not routes:
+              Retry must be one tap and must not tear down the run. */}
           <Stack.Screen name="game" />
-          <Stack.Screen name="game-over" />
           <Stack.Screen name="settings" />
           <Stack.Screen name="shop" />
         </Stack>

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { configureFeedback, feedback } from '@/feedback';
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -42,7 +43,11 @@ export default function SettingsScreen() {
   const toggle = (key: ToggleKey) => {
     const next = { ...settings, [key]: !settings[key] };
     setSettings(next);
+    // Apply immediately so the confirmation tap already respects the new
+    // setting — toggling sound off should not then play a sound.
+    configureFeedback(next);
     void saveSettings(next);
+    feedback.tap();
   };
 
   return (
@@ -64,7 +69,13 @@ export default function SettingsScreen() {
         ))}
       </View>
 
-      <Pressable onPress={() => router.back()} accessibilityRole="button">
+      <Pressable
+        onPress={() => {
+          feedback.back();
+          router.back();
+        }}
+        accessibilityRole="button"
+      >
         <Text style={styles.back}>← BACK</Text>
       </Pressable>
     </SafeAreaView>

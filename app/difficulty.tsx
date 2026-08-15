@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { feedback } from '@/feedback';
 import { DIFFICULTY_CONFIG } from '@/game/config/difficulty';
 import { DIFFICULTIES, type Difficulty } from '@/game/types';
 import { colors } from '@/theme/colors';
@@ -28,7 +29,10 @@ export default function DifficultyScreen() {
               key={difficulty}
               accessibilityRole="button"
               accessibilityLabel={`${config.label}, speed ${config.displaySpeed}, ${config.startingBlocks} starting blocks`}
-              onPress={() => router.push({ pathname: '/game', params: { difficulty } })}
+              onPress={() => {
+                feedback.levelConfirm();
+                router.push({ pathname: '/game', params: { difficulty } });
+              }}
               style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             >
               <View style={[styles.tierBar, { backgroundColor: TIER_COLOR[difficulty] }]} />
@@ -45,7 +49,13 @@ export default function DifficultyScreen() {
         })}
       </View>
 
-      <Pressable onPress={() => router.back()} accessibilityRole="button">
+      <Pressable
+        onPress={() => {
+          feedback.back();
+          router.back();
+        }}
+        accessibilityRole="button"
+      >
         <Text style={styles.back}>← BACK</Text>
       </Pressable>
     </SafeAreaView>

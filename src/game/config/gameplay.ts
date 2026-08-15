@@ -22,6 +22,16 @@ export const gameplay = {
   dragFollowStrength: 18,
 
   /**
+   * Ceiling on vertical travel, world units per second.
+   *
+   * Doubles as the fairness validator's model of what the player can achieve:
+   * an opening is only reachable if the stack can physically get there in the
+   * time before the obstacle arrives. Raising this makes the game easier *and*
+   * loosens validation, so change it deliberately.
+   */
+  maxVerticalSpeed: 2200,
+
+  /**
    * Frame delta ceiling, in seconds.
    *
    * Load-bearing, not a nicety: returning from background produces a delta of

@@ -1,13 +1,31 @@
 import { router } from 'expo-router';
+import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { configureFeedback, feedback, initFeedback } from '@/feedback';
+import { loadSettings } from '@/storage/settings';
 import { colors } from '@/theme/colors';
 import { spacing, typography } from '@/theme/spacing';
 
 /** Main Menu — MVP Screen 2. */
 export default function MainMenuScreen() {
+  // Preload audio here so the first tap in-game is not the thing that pays for
+  // decoding every cue.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const settings = await loadSettings();
+      if (cancelled) return;
+      configureFeedback(settings);
+      void initFeedback();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.titleBlock}>
@@ -20,7 +38,10 @@ export default function MainMenuScreen() {
         <PrimaryButton
           label="PLAY"
           variant="primary"
-          onPress={() => router.push('/difficulty')}
+          onPress={() => {
+            feedback.transition();
+            router.push('/difficulty');
+          }}
         />
         {/*
           Amendment A-2026-08-15-2: the Shop is a locked placeholder.
@@ -35,7 +56,10 @@ export default function MainMenuScreen() {
         <PrimaryButton
           label="SETTINGS"
           variant="neutral"
-          onPress={() => router.push('/settings')}
+          onPress={() => {
+            feedback.tap();
+            router.push('/settings');
+          }}
         />
       </View>
 

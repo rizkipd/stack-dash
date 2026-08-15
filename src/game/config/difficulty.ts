@@ -24,6 +24,12 @@ export type DifficultyConfig = {
    * Matches the 4 / 6 / 8 / 10 scale in `image.png`.
    */
   displaySpeed: number;
+  /**
+   * Cube spin rate in revolutions per second.
+   * The reference sheet's SPEED VS ROTATION panel: rotation reads as tension,
+   * so it rises with the tier (Slow → Normal → Fast → Very Fast).
+   */
+  rotationSpeed: number;
   label: string;
 };
 
@@ -35,6 +41,7 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
     spawnSpacing: 520,
     collectibleChance: 0.35,
     displaySpeed: 4,
+    rotationSpeed: 0.16,
     label: 'EASY',
   },
   medium: {
@@ -44,6 +51,7 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
     spawnSpacing: 440,
     collectibleChance: 0.25,
     displaySpeed: 6,
+    rotationSpeed: 0.26,
     label: 'MEDIUM',
   },
   hard: {
@@ -53,6 +61,7 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
     spawnSpacing: 380,
     collectibleChance: 0.18,
     displaySpeed: 8,
+    rotationSpeed: 0.40,
     label: 'HARD',
   },
   /** Amendment A-2026-08-15-1. Config only — introduces no new systems. */
@@ -63,6 +72,7 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
     spawnSpacing: 330,
     collectibleChance: 0.14,
     displaySpeed: 10,
+    rotationSpeed: 0.58,
     label: 'INSANE',
   },
 };
