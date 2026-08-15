@@ -51,9 +51,6 @@ export function useGameLoop({
 
   const renderState = useSharedValue<RenderState>(createRenderState());
 
-  // A stable scratch buffer so the hot loop allocates nothing per frame.
-  const scratch = useMemo(() => createRenderState(), []);
-
   const [hud, setHud] = useState<HudState>({
     score: 0,
     blocks: engine.blockCount,
@@ -114,7 +111,6 @@ export function useGameLoop({
         geometry.scale,
         geometry.offsetX,
         geometry.offsetY,
-        scratch,
       );
 
       hudAccumulator += dt;
@@ -135,7 +131,7 @@ export function useGameLoop({
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [engine, renderState, scratch, geometry]);
+  }, [engine, renderState, geometry]);
 
   const start = useCallback(() => {
     engine.start();

@@ -84,15 +84,19 @@ const X_AXIS_RATIO = 0.55;
 /**
  * Packs the engine's current state for the renderer.
  *
- * Mutates and returns `out` so the hot loop allocates nothing.
+ * **Returns a fresh object every frame, deliberately.** Reanimated freezes
+ * objects written to a shared value, so reusing one scratch buffer and
+ * reassigning the same reference throws on the next frame's mutation and kills
+ * the game loop. A new object with new arrays each frame is a few hundred
+ * numbers of garbage — cheap, and the only correct option.
  */
 export function buildRenderState(
   engine: GameEngine,
   scale: number,
   offsetX: number,
   offsetY: number,
-  out: RenderState,
 ): RenderState {
+  const out = createRenderState();
   out.scale = scale;
   out.offsetX = offsetX;
   out.offsetY = offsetY;
@@ -120,7 +124,6 @@ export function buildRenderState(
   const blocks = engine.stack.blocks;
   const count = blocks.length;
   const size = engine.stack.blockSize;
-  out.blocks.length = count * BLOCK_STRIDE;
 
   for (let i = 0; i < count; i += 1) {
     const rect = blockRect(engine.stack, i);
@@ -159,7 +162,6 @@ export function buildRenderState(
       oi += OBSTACLE_STRIDE;
     }
   }
-  out.obstacles.length = oi;
 
   // --- Collectibles ---
   let ci = 0;
@@ -173,7 +175,6 @@ export function buildRenderState(
       0.5 + 0.5 * Math.sin((engine.elapsed * TAU) / 1.2);
     ci += COLLECTIBLE_STRIDE;
   }
-  out.collectibles.length = ci;
 
   // --- Particles ---
   let pi = 0;
@@ -187,7 +188,6 @@ export function buildRenderState(
     out.particles[pi + 5] = particle.kind;
     pi += PARTICLE_STRIDE;
   }
-  out.particles.length = pi;
 
   return out;
 }

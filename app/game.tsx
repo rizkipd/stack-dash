@@ -11,6 +11,7 @@ import { PauseOverlay } from '@/components/ui/PauseOverlay';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import type { FrameEvents } from '@/game/engine/GameEngine';
 import { useGameLoop } from '@/hooks/useGameLoop';
+import { useKeyboardControls } from '@/hooks/useKeyboardControls';
 import { useVerticalDrag } from '@/hooks/useVerticalDrag';
 import {
   configureFeedback,
@@ -85,28 +86,49 @@ export default function GameScreen() {
     enabled: !hud.paused && !hud.gameOver,
   });
 
-  // Load settings and best score, then start the run.
+  const togglePause = useCallback(() => {
+    if (hud.gameOver) return;
+    feedback.pause();
+    if (hud.paused) resume();
+    else pause();
+  }, [hud.paused, hud.gameOver, pause, resume]);
+
+  /**
+   * Start the run immediately.
+   *
+   * Gameplay must never wait on storage or audio. An earlier version awaited
+   * `initFeedback()` before calling `start()`, so anything slow or stuck in
+   * audio initialisation left the game frozen on frame one.
+   */
+  useEffect(() => {
+    start();
+  }, [start]);
+
+  // Settings, best score and audio load alongside the run, not in front of it.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [settings, scores] = await Promise.all([
-        loadSettings(),
-        loadHighScores(),
-      ]);
-      if (cancelled) return;
-      configureFeedback(settings);
-      setBest(scores[difficulty]);
-      void saveSettings({ ...settings, lastDifficulty: difficulty });
-      await initFeedback();
-      if (cancelled) return;
-      startMusic(difficulty);
-      start();
+      try {
+        const [settings, scores] = await Promise.all([
+          loadSettings(),
+          loadHighScores(),
+        ]);
+        if (cancelled) return;
+        configureFeedback(settings);
+        setBest(scores[difficulty]);
+        void saveSettings({ ...settings, lastDifficulty: difficulty });
+        await initFeedback();
+        if (cancelled) return;
+        startMusic(difficulty);
+      } catch {
+        // A failure here costs sound and the best-score display, nothing more.
+      }
     })();
     return () => {
       cancelled = true;
       stopMusic();
     };
-  }, [difficulty, start]);
+  }, [difficulty]);
 
   // Low-blocks warning, on the crossing rather than every frame below it.
   useEffect(() => {
@@ -158,6 +180,15 @@ export default function GameScreen() {
     router.dismissTo('/');
   }, []);
 
+  // Web-only development convenience; a no-op on iOS and Android.
+  useKeyboardControls({
+    getTargetY,
+    setTargetY,
+    onTogglePause: togglePause,
+    onRestart: handleRestart,
+    enabled: !hud.paused && !hud.gameOver,
+  });
+
   return (
     <View style={styles.container}>
       <GestureDetector gesture={drag}>
@@ -172,10 +203,7 @@ export default function GameScreen() {
           best={Math.floor(best / 10)}
           blocks={hud.blocks}
           distance={hud.distance}
-          onPause={() => {
-            feedback.tap();
-            pause();
-          }}
+          onPause={togglePause}
         />
 
         <FeedbackBanner kind={banner} nonce={bannerNonce} />
