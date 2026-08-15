@@ -364,8 +364,8 @@ const BLOOM_SIGMA = 0.09;
  * Halo behind a player cube. Deliberately tight and low-alpha: an obstacle
  * edge behind it must stay readable (`docs/ART_DIRECTION.md` §1).
  */
-const HALO_RADIUS = 0.58;
-const HALO_ALPHA = 0.15;
+const HALO_RADIUS = 0.62;
+const HALO_ALPHA = 0.2;
 
 
 /**
@@ -396,7 +396,7 @@ function rgb01(hex: string): readonly [number, number, number] {
 }
 
 const PLAYER_SKIN: CubeSkin = {
-  shadow: rgb01('#12285C'),
+  shadow: rgb01('#1E3F96'),
   body: rgb01(colors.block),
   highlight: rgb01(colors.blockLight),
   edge: [0.84, 0.97, 1],
