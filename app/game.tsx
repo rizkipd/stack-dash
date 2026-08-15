@@ -198,13 +198,7 @@ export default function GameScreen() {
       </GestureDetector>
 
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
-        <HUD
-          score={hud.score}
-          best={Math.floor(best / 10)}
-          blocks={hud.blocks}
-          distance={hud.distance}
-          onPause={togglePause}
-        />
+        <HUD score={hud.score} blocks={hud.blocks} onPause={togglePause} />
 
         <FeedbackBanner kind={banner} nonce={bannerNonce} />
 

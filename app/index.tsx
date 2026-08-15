@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
@@ -10,7 +10,7 @@ import { DIFFICULTIES } from '@/game/types';
 import { loadHighScores } from '@/storage/highScore';
 import { loadSettings } from '@/storage/settings';
 import { colors } from '@/theme/colors';
-import { layout, spacing, typography } from '@/theme/spacing';
+import { layout, spacing } from '@/theme/spacing';
 
 /** Main Menu — MVP Screen 2. */
 export default function MainMenuScreen() {
@@ -48,10 +48,19 @@ export default function MainMenuScreen() {
         </View>
 
         <View style={styles.titleBlock}>
-          {/* Two-tone wordmark from the sheet: cool STACK over warm DASH. */}
-          <Text style={styles.titleTop}>STACK</Text>
-          <Text style={styles.titleBottom}>DASH</Text>
-          <View style={styles.rule} />
+          {/*
+            The real wordmark, extracted from the design sheet by
+            `scripts/extract-logo.mjs`. Text with a shadow was only ever an
+            approximation of a lockup that already exists.
+          */}
+          <Image
+            source={require('../assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel="Stack Dash"
+          />
           <Text style={styles.tagline}>AVOID THE WALLS · KEEP YOUR BLOCKS</Text>
         </View>
 
@@ -154,33 +163,9 @@ const styles = StyleSheet.create({
   },
 
   titleBlock: { alignItems: 'center' },
-  titleTop: {
-    color: colors.text,
-    fontSize: typography.title,
-    fontWeight: '900',
-    letterSpacing: 6,
-    lineHeight: typography.title * 1.02,
-    // Cyan bloom under white, so the wordmark reads as lit rather than printed.
-    textShadowColor: 'rgba(96,165,250,0.85)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 18,
-  },
-  titleBottom: {
-    color: colors.accent,
-    fontSize: typography.title,
-    fontWeight: '900',
-    letterSpacing: 6,
-    lineHeight: typography.title * 1.02,
-    textShadowColor: 'rgba(245,158,11,0.8)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
-  },
-  rule: {
-    width: 132,
-    height: 2,
-    backgroundColor: colors.collect,
-    opacity: 0.75,
-    marginTop: spacing.md,
+  logo: {
+    width: 300,
+    height: 191, // 858x546 source, aspect preserved
     marginBottom: spacing.sm,
   },
   tagline: {

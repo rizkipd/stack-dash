@@ -130,7 +130,7 @@ export const SKY_COLORS = [
   colors.bgTop,
   colors.bgMid,
   '#7A2A93',
-  '#B33A85', // magenta core, behind the far city
+  '#C6438F', // magenta core, behind the far city
   colors.bgBottom,
   '#3E1030',
   colors.ground,
@@ -139,8 +139,8 @@ export const SKY_STOPS = [0, 0.22, 0.45, 0.61, 0.71, 0.79, 0.87, 1];
 
 /** City bloom lifting off the skyline. Three stops fake a squared falloff. */
 export const BLOOM_COLORS = [
-  'rgba(226, 82, 168, 0.30)',
-  'rgba(226, 82, 168, 0.13)',
+  'rgba(232, 88, 178, 0.44)',
+  'rgba(226, 82, 168, 0.19)',
   'rgba(226, 82, 168, 0)',
 ];
 export const BLOOM_STOPS = [0, 0.45, 1];
@@ -1145,10 +1145,6 @@ export function drawScene(
         const nubs = Skia.Path.Make();
         let hasNubs = false;
 
-        // Stable seed: a wall's world y and height never change, so the
-        // variation below does not crawl as the wall scrolls left.
-        const seed = Math.round(obstacles[i + 1]! * 31 + obstacles[i + 3]! * 17);
-
         for (let r = firstRow; r <= lastRow; r += 1) {
           const ty = wallTop + r * rowH;
           const yb = ty + seamH; // back (upper) edge of the top face
@@ -1168,19 +1164,30 @@ export function drawScene(
           tops.lineTo(faceR, yf);
           tops.close();
 
-          // Warm corner highlight on roughly two rows in three, so the masonry
-          // varies instead of reading as a ladder. Leading edge only, and below
-          // the seam, so it strengthens the near face without bridging the gap.
-          const hash = Math.sin(seed * 12.9898 + r * 78.233) * 43758.5453;
-          if (hash - Math.floor(hash) > 0.32) {
-            hasNubs = true;
-            const nubW = rimW * 1.25;
-            nubs.moveTo(x0, yb);
-            nubs.lineTo(x0 + nubW, yb);
-            nubs.lineTo(x0 + nubW, yf);
-            nubs.lineTo(x0, yf);
-            nubs.close();
-          }
+          // Amber edge on every cube, per the sheet's OBSTACLE ASSETS panel.
+          // This is the walls' signature and it earns its place twice over:
+          // it is also the strongest readability cue they have, outlining each
+          // tile against a saturated background.
+          hasNubs = true;
+          const edgeW = Math.max(1, rimW * 0.8);
+          // Along the front face's lower edge.
+          nubs.moveTo(x0, yf - edgeW);
+          nubs.lineTo(x1, yf - edgeW);
+          nubs.lineTo(x1, yf);
+          nubs.lineTo(x0, yf);
+          nubs.close();
+          // Down the left (leading) edge of this tile.
+          nubs.moveTo(x0, yb);
+          nubs.lineTo(x0 + edgeW, yb);
+          nubs.lineTo(x0 + edgeW, ty + rowH);
+          nubs.lineTo(x0, ty + rowH);
+          nubs.close();
+          // Down the right edge, so the tile is closed on both sides.
+          nubs.moveTo(x1 - edgeW, yb);
+          nubs.lineTo(x1, yb);
+          nubs.lineTo(x1, ty + rowH);
+          nubs.lineTo(x1 - edgeW, ty + rowH);
+          nubs.close();
         }
 
         wallPaint.setColor(cMortar);
@@ -1192,7 +1199,7 @@ export function drawScene(
 
         if (hasNubs) {
           wallPaint.setColor(cRim);
-          wallPaint.setAlphaf(0.55);
+          wallPaint.setAlphaf(0.72);
           canvas.drawPath(nubs, wallPaint);
         }
 
