@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   titleBlock: { alignItems: 'center' },
   logo: {
     width: 300,
-    height: 191, // 858x546 source, aspect preserved
+    height: 120, // 900x361 source, aspect preserved
     marginBottom: spacing.sm,
   },
   tagline: {

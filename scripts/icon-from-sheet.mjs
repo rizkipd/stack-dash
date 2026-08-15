@@ -42,13 +42,15 @@ console.log(`sheet ${SW}x${SH}`);
 /**
  * Crop boxes as fractions of the sheet.
  *
- * `icon` is inset *inside* the panel's rounded frame on purpose: iOS and
- * Android apply their own corner mask, and a pre-rounded icon shows dark
- * corners inside the system's rounding.
+ * `icon` is inset *inside* the panel's rounded frame on purpose, and the inset
+ * is deliberately generous. iOS and Android apply their own corner mask, so a
+ * crop that keeps any of the sheet's own rounded border leaves that arc
+ * stranded inside the system's rounding — visible as a bright hairline across
+ * each corner.
  */
 const BOX = {
-  icon: { x: 0.033, y: 0.076, w: 0.455, h: 0.683 },
-  logo: { x: 0.105, y: 0.800, w: 0.320, h: 0.180 },
+  icon: { x: 0.042, y: 0.088, w: 0.437, h: 0.659 },
+  logo: { x: 0.098, y: 0.788, w: 0.336, h: 0.202 },
 };
 
 function cut(box, size, { square = true, inset = 0 } = {}) {
