@@ -15,7 +15,8 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "postinstall": "node scripts/copy-canvaskit.mjs",
     "preview": "tsx scripts/preview.mjs",
-    "audit:fairness": "tsx scripts/audit-fairness.mjs"
+    "audit:fairness": "tsx scripts/audit-fairness.mjs",
+    "icons": "node scripts/icon-from-sheet.mjs"
   },
   "jest": {
     "preset": "jest-expo",
