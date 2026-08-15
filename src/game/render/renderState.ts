@@ -64,22 +64,42 @@ export function createRenderState(): RenderState {
 
 const TAU = Math.PI * 2;
 
-/** Seconds of trail between the bottom block and the top of the stack. */
-const WHIP_SECONDS = 0.05;
+/**
+ * Seconds of trail between the bottom block and the top of the stack.
+ *
+ * Kept small deliberately. At 0.05 the top block lagged by more than half its
+ * own height during a fast flick and the column visibly came apart — it read as
+ * falling debris rather than one object with mass.
+ */
+const WHIP_SECONDS = 0.016;
 /** How far, in block widths, the top of the stack sways behind a fast move. */
-const SWAY_STRENGTH = 0.2;
-const MAX_LEAN = 0.3; // radians
+const SWAY_STRENGTH = 0.055;
+const MAX_LEAN = 0.1; // radians
 
 /**
  * Phase offset between adjacent cubes, in revolutions.
  *
- * "Each block has a tiny phase difference" — without it the stack spins as one
- * rigid object and reads as a single sprite rather than a stack of cubes.
+ * "Each block has a *tiny* phase difference" — the emphasis matters. At 0.085
+ * (~30 deg per block) an 8-block stack spanned 240 deg of rotation and read as a
+ * heap of loose shards. ~4 deg keeps every cube near the same attitude, so the
+ * column stays legible while still rippling rather than spinning as one rigid
+ * sprite.
  */
-const PHASE_PER_BLOCK = 0.085;
+const PHASE_PER_BLOCK = 0.011;
 
-/** X-axis spin relative to Y, so the tumble is not a flat carousel. */
-const X_AXIS_RATIO = 0.55;
+/**
+ * Fixed camera elevation, in radians. **Not** a spin rate.
+ *
+ * The sheet's rotation strip (0/45/.../315 deg) turns the cube about its
+ * vertical axis only, viewed from slightly above — so it always reads as a
+ * cube and only the front face changes. Continuously rotating X instead made
+ * every cube tip forward onto its top face, and the stack looked like a pile
+ * of flat slabs.
+ *
+ * ~17 deg gives the three-quarter read of the reference without so much top
+ * face that the front one gets crushed.
+ */
+const VIEW_ELEVATION = 0.3;
 
 /**
  * Packs the engine's current state for the renderer.
@@ -145,7 +165,9 @@ export function buildRenderState(
     out.blocks[o] = rect.x + swayX;
     out.blocks[o + 1] = rect.y + trailY + bob;
     out.blocks[o + 2] = size;
-    out.blocks[o + 3] = angle * X_AXIS_RATIO;
+    // Fixed elevation, with a whisper of sway so the stack is never dead
+    // rigid; the continuous turn is on Y alone.
+    out.blocks[o + 3] = VIEW_ELEVATION + normalised * 0.05;
     out.blocks[o + 4] = angle;
     out.blocks[o + 5] = lean;
     out.blocks[o + 6] = out.trail;

@@ -50,3 +50,6 @@ coverage/
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+
+# Offline render previews (scripts/preview.mjs)
+.preview/
