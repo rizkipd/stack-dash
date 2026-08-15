@@ -1571,9 +1571,16 @@ export function drawScene(
         // now sit at a ~30 degree isometric, and a wall whose top face is a
         // thin sliver reads as a flat column beside them. The sheet gives every
         // wall cube a prominent silver top — that face is what makes it a cube.
-        const depth = Math.max(2, Math.min(rowH * 0.42, innerW * 0.46));
+        // At 0.42 of a roughly square tile the top face was skewed almost as far
+        // as it was wide and read as a wedge. The sheet's is a shallow
+        // parallelogram: present enough to make the cube solid, not so deep it
+        // takes over the tile from the front face.
+        const depth = Math.max(2, Math.min(rowH * 0.26, innerW * 0.3));
         const faceR = x1 - depth;
-        const seamH = Math.max(1, Math.min(2.25, rowH * 0.05));
+        // Gap between stacked cubes. Deeper than a hairline on purpose: in the
+        // sheet the cubes are visibly separate objects, and a 1px seam reads as
+        // a scored line on one surface rather than a join between two.
+        const seamH = Math.max(1.5, Math.min(4, rowH * 0.09));
         const rimW = Math.max(1.25, Math.min(2.5, ww * 0.05));
 
         // 1. Mortar / silhouette. Opaque backing, so a wall is never
@@ -1582,21 +1589,11 @@ export function drawScene(
         wallPaint.setAlphaf(1);
         canvas.drawRect(Skia.XYWHRect(wx, clipTop, ww, clipH), wallPaint);
 
-        // 2. Front faces, as one fill: every interior cube shares this tone.
-        wallPaint.setColor(cFace);
-        canvas.drawRect(Skia.XYWHRect(x0, clipTop, faceR - x0, clipH), wallPaint);
-
-        // 3. Right faces. The top-face path below notches into this band at
-        //    every row, which is what makes the column read as cubes rather
-        //    than one extruded bar.
-        wallPaint.setColor(cSide);
-        canvas.drawRect(Skia.XYWHRect(faceR, clipTop, x1 - faceR, clipH), wallPaint);
-
-        // 4. Leading edge. Warm rim light on the exact face the stack meets —
-        //    this is the wall's near side and it has to be findable at speed.
-        wallPaint.setColor(cRim);
-        wallPaint.setAlphaf(0.3);
-        canvas.drawRect(Skia.XYWHRect(x0, clipTop, rimW, clipH), wallPaint);
+        // Front and side faces used to be two continuous bands running the
+        // whole wall, with only thin seams notched across them. That is what
+        // kept a wall reading as one extruded bar with stripes: a cube needs
+        // its own three faces, not a shared column. Both are now built per
+        // tile in the loop below, still batched into one path each.
 
         // Row range, clipped to the visible band.
         const firstRow = Math.max(0, Math.floor((clipTop - wallTop) / rowH));
@@ -1610,6 +1607,7 @@ export function drawScene(
         const seams = Skia.Path.Make();
         const tops = Skia.Path.Make();
         const fronts = Skia.Path.Make();
+        const sides = Skia.Path.Make();
         const nubs = Skia.Path.Make();
         // Matches the player cube's corner softness, so wall and stack read as
         // the same material.
@@ -1645,6 +1643,14 @@ export function drawScene(
             fronts.addRRect(
               Skia.RRectXY(Skia.XYWHRect(x0, yf, faceR - x0, fh), tileR, tileR),
             );
+            // The cube's own right face, receding up-and-right by `depth` so it
+            // shares the top face's projection. Per tile, so the shading breaks
+            // at every seam the way a stack of separate boxes does.
+            sides.moveTo(faceR, yf);
+            sides.lineTo(x1, yb);
+            sides.lineTo(x1, yb + fh);
+            sides.lineTo(faceR, tileBottom);
+            sides.close();
           }
 
           // Amber accents at the cube's corners only — in the sheet these are
@@ -1666,8 +1672,11 @@ export function drawScene(
         // Rounded front faces over the flat body, then the recessed seams
         // between cubes, then the lit top faces. Three draws for the whole
         // wall however tall it is.
-        wallPaint.setColor(cFace);
+        wallPaint.setColor(cSide);
         wallPaint.setAlphaf(1);
+        canvas.drawPath(sides, wallPaint);
+
+        wallPaint.setColor(cFace);
         canvas.drawPath(fronts, wallPaint);
 
         wallPaint.setColor(cMortar);
