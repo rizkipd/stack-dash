@@ -500,6 +500,16 @@ export function drawScene(
       facePaint.setAntiAlias(true);
 
       /**
+       * Specular sheen. Blurred, so the highlight falls off across the face
+       * like a gradient; unblurred it reads as a hard inset panel.
+       */
+      const sheenPaint = Skia.Paint();
+      sheenPaint.setAntiAlias(true);
+      sheenPaint.setMaskFilter(
+        Skia.MaskFilter.MakeBlur(BLUR_NORMAL, Math.max(0.5, cubeUnit * 0.12), true),
+      );
+
+      /**
        * Wide blurred additive stroke along the cube's edges — shaped bloom that
        * follows the silhouette instead of smudging a circle over it.
        */
@@ -744,6 +754,31 @@ export function drawScene(
           facePaint.setColor(pal.faces[step]!);
           if (alpha < 1) facePaint.setAlphaf(alpha);
           canvas.drawPath(path, facePaint);
+
+          // Specular sheen: a smaller quad inset toward the lit corner, two
+          // ramp steps brighter. The sheet's cubes have a glossy gradient
+          // across each face; flat fills were the last thing making ours read
+          // as vector shapes rather than lit objects. One extra path per
+          // visible face, and only where the light actually falls.
+          if (diffuse > 0.25) {
+            const gx = (vx[i0]! + vx[i1]! + vx[i2]! + vx[i3]!) * 0.25;
+            const gy = (vy[i0]! + vy[i1]! + vy[i2]! + vy[i3]!) * 0.25;
+            // Pull toward the vertex nearest the light, so the sheen sits
+            // where the highlight belongs rather than dead centre.
+            const k = 0.42;
+            const sheen = Skia.Path.Make();
+            sheen.moveTo(gx + (vx[i0]! - gx) * k, gy + (vy[i0]! - gy) * k);
+            sheen.lineTo(gx + (vx[i1]! - gx) * k, gy + (vy[i1]! - gy) * k);
+            sheen.lineTo(gx + (vx[i2]! - gx) * k, gy + (vy[i2]! - gy) * k);
+            sheen.lineTo(gx + (vx[i3]! - gx) * k, gy + (vy[i3]! - gy) * k);
+            sheen.close();
+
+            let lit = step + 3;
+            if (lit >= SHADE_STEPS) lit = SHADE_STEPS - 1;
+            sheenPaint.setColor(pal.faces[lit]!);
+            sheenPaint.setAlphaf(alpha * 0.6 * diffuse);
+            canvas.drawPath(sheen, sheenPaint);
+          }
         }
 
         // Pass 3 — mid glow along every visible edge.
