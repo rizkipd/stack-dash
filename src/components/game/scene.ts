@@ -315,23 +315,18 @@ const SKYLINE: readonly SkylineLayer[] = [
  * everything else here.
  */
 const OBSTACLE_TONES = {
-  /** Mortar, silhouette, and the gaps between cubes. */
-  mortar: '#12151F',
-  /** Cube front face. Slate with a blue cast, per the sheet. */
-  face: '#3E4557',
-  /** Cube right face, turned away from the light. */
-  side: '#2A3040',
-  /** Lit top face of an interior cube. */
-  tileTop: '#9BA5B8',
-  /** Top face of the cube terminating a wall at an opening. */
-  capFace: '#C6CDDB',
-  /** Brightest hairline, sitting exactly on the opening boundary. */
-  capEdge: '#EEF2F8',
   /**
-   * Warm rim light from the ground neon. A theme token on purpose: it is the
-   * same accent as the road glow, which is what motivates it in-fiction.
+   * Mortar backing behind the cubes. Everything else the walls used to need —
+   * face, side, top, cap and rim tones — moved into `WALL_SKIN`, because the
+   * tiles are now drawn by the same `drawCube` as the player's stack rather
+   * than assembled from hand-shaded rectangles.
    */
-  rim: colors.accent,
+  mortar: '#12151F',
+  /** Bright face on the cube that terminates a wall at an opening. */
+  capFace: '#C6CDDB',
+  /** The hairline sitting exactly on the opening boundary — the single most
+   *  important edge on screen, so it is drawn last and at full strength. */
+  capEdge: '#EEF2F8',
 } as const;
 
 /**
@@ -566,6 +561,28 @@ const GOLD_RING = rgb01('#FFB020');
 const STAR_CORE: readonly [number, number, number] = [1, 1, 1];
 const STAR_GLOW = rgb01(colors.collectGlow);
 
+/**
+ * Wall cubes.
+ *
+ * The sheet's obstacles are the *same* rounded, gloss-shaded cube as the
+ * player's, in slate. Approximating them with shaded rectangles was never
+ * going to converge — the construction has to match, only the palette differs.
+ */
+const WALL_SKIN: CubeSkin = {
+  shadow: rgb01('#1B2030'),
+  body: rgb01('#3E4557'),
+  highlight: rgb01('#9BA5B8'),
+  // Amber rim, so the neon fillet `drawCube` already draws becomes the sheet's
+  // edge light. Painting a separate stripe on the face never sat on the edge
+  // properly; this is on the silhouette by construction.
+  edge: rgb01('#E8912C'),
+  glow: rgb01('#7A4A12'),
+};
+
+/** Fixed three-quarter view for wall cubes: they never rotate. */
+const WALL_ROT_X = -0.5;
+const WALL_ROT_Y = -0.42;
+
 type CubePalette = {
   /** `SHADE_STEPS` entries, shadow → body → highlight → edge. */
   faces: Float32Array[];
@@ -798,6 +815,9 @@ export function drawScene(
       // a block that came apart.
       const blockPx = cubeUnit * CUBE_FILL;
       const playerPal = makePalette(PLAYER_SKIN, blockPx);
+      // Wall cubes share the player's construction, so they share its palette
+      // machinery too — only the skin differs.
+      const wallPal = makePalette(WALL_SKIN, blockPx);
       const collectPal =
         s.collectibles.length > 0
           ? makePalette(COLLECT_SKIN, s.collectibles[2]! * scale)
@@ -1516,12 +1536,8 @@ export function drawScene(
       // inside the wall rather than overhanging it, so a wall can never look
       // taller or wider than it actually is.
       const cMortar = Skia.Color(OBSTACLE_TONES.mortar);
-      const cFace = Skia.Color(OBSTACLE_TONES.face);
-      const cSide = Skia.Color(OBSTACLE_TONES.side);
-      const cTileTop = Skia.Color(OBSTACLE_TONES.tileTop);
       const cCapFace = Skia.Color(OBSTACLE_TONES.capFace);
       const cCapEdge = Skia.Color(OBSTACLE_TONES.capEdge);
-      const cRim = Skia.Color(OBSTACLE_TONES.rim);
 
       const wallPaint = Skia.Paint();
       wallPaint.setAntiAlias(true);
@@ -1571,29 +1587,14 @@ export function drawScene(
         // now sit at a ~30 degree isometric, and a wall whose top face is a
         // thin sliver reads as a flat column beside them. The sheet gives every
         // wall cube a prominent silver top — that face is what makes it a cube.
-        // At 0.42 of a roughly square tile the top face was skewed almost as far
-        // as it was wide and read as a wedge. The sheet's is a shallow
-        // parallelogram: present enough to make the cube solid, not so deep it
-        // takes over the tile from the front face.
-        const depth = Math.max(2, Math.min(rowH * 0.26, innerW * 0.3));
-        const faceR = x1 - depth;
-        // Gap between stacked cubes. Deeper than a hairline on purpose: in the
-        // sheet the cubes are visibly separate objects, and a 1px seam reads as
-        // a scored line on one surface rather than a join between two.
-        const seamH = Math.max(1.5, Math.min(4, rowH * 0.09));
-        const rimW = Math.max(1.25, Math.min(2.5, ww * 0.05));
 
-        // 1. Mortar / silhouette. Opaque backing, so a wall is never
-        //    see-through whatever the detail passes above it do.
+        // Mortar silhouette. Opaque backing behind the cubes, so a wall is
+        // never see-through where they meet, and so a tall wall still reads as
+        // one obstacle rather than a loose column of boxes.
         wallPaint.setColor(cMortar);
         wallPaint.setAlphaf(1);
         canvas.drawRect(Skia.XYWHRect(wx, clipTop, ww, clipH), wallPaint);
 
-        // Front and side faces used to be two continuous bands running the
-        // whole wall, with only thin seams notched across them. That is what
-        // kept a wall reading as one extruded bar with stripes: a cube needs
-        // its own three faces, not a shared column. Both are now built per
-        // tile in the loop below, still batched into one path each.
 
         // Row range, clipped to the visible band.
         const firstRow = Math.max(0, Math.floor((clipTop - wallTop) / rowH));
@@ -1602,94 +1603,31 @@ export function drawScene(
           Math.floor((clipBottom - wallTop - 0.001) / rowH),
         );
 
-        // 5-7. Per-row detail batched into three paths, so wall height costs
-        //      path vertices rather than draw calls.
-        const seams = Skia.Path.Make();
-        const tops = Skia.Path.Make();
-        const fronts = Skia.Path.Make();
-        const sides = Skia.Path.Make();
-        const nubs = Skia.Path.Make();
-        // Matches the player cube's corner softness, so wall and stack read as
-        // the same material.
-        const tileR = Math.max(1.5, Math.min(rowH, innerW) * 0.16);
-        let hasNubs = false;
-
+        // Each tile is a real cube, drawn by the same `drawCube` the player's
+        // stack uses — rounded corners, gloss gradient, three lit faces, neon
+        // fillet — with a slate palette and a fixed three-quarter attitude.
+        //
+        // This replaced a hand-built approximation of shaded rectangles. That
+        // approach kept almost matching and never arriving, because the sheet's
+        // walls are not shaded rectangles: they are this cube in another
+        // colour. Costs more draws than the batched version, bounded by the
+        // on-screen row clamp above and `MAX_CUBE_ROWS`.
+        const cubeSize = Math.min(innerW, rowH) * 0.96;
         for (let r = firstRow; r <= lastRow; r += 1) {
-          const ty = wallTop + r * rowH;
-          const yb = ty + seamH; // back (upper) edge of the top face
-          const yf = yb + depth; // front (lower) edge of the top face
-          const tileBottom = ty + rowH;
+          const cyTile = wallTop + r * rowH + rowH * 0.5;
+          drawCube(
+            (x0 + x1) * 0.5,
+            cyTile,
+            cubeSize,
+            WALL_ROT_X,
+            WALL_ROT_Y,
+            0,
+            wallPal,
+            1,
+          );
 
-          // Gap between cubes.
-          seams.moveTo(x0, ty);
-          seams.lineTo(x1, ty);
-          seams.lineTo(x1, yb);
-          seams.lineTo(x0, yb);
-          seams.close();
-
-          // Lit top face, receding up-and-right.
-          tops.moveTo(x0, yf);
-          tops.lineTo(x0 + depth, yb);
-          tops.lineTo(x1, yb);
-          tops.lineTo(faceR, yf);
-          tops.close();
-
-          // Front face as a rounded tile. The sheet's walls are rounded cubes,
-          // exactly like the player's — sharp-cornered slabs are what made
-          // these read as a painted ladder rather than masonry. Batched into
-          // one path, so rounding the whole wall still costs a single draw.
-          const fh = tileBottom - yf;
-          if (fh > 2) {
-            fronts.addRRect(
-              Skia.RRectXY(Skia.XYWHRect(x0, yf, faceR - x0, fh), tileR, tileR),
-            );
-            // The cube's own right face, receding up-and-right by `depth` so it
-            // shares the top face's projection. Per tile, so the shading breaks
-            // at every seam the way a stack of separate boxes does.
-            sides.moveTo(faceR, yf);
-            sides.lineTo(x1, yb);
-            sides.lineTo(x1, yb + fh);
-            sides.lineTo(faceR, tileBottom);
-            sides.close();
-          }
-
-          // Amber accents at the cube's corners only — in the sheet these are
-          // short marks where edges meet, not the continuous outline this used
-          // to draw. That outline was the "ladder" look.
-          hasNubs = true;
-          const m = Math.max(1.5, rimW * 1.6);
-          const t = Math.max(1, rimW * 0.55);
-          // Top-left and bottom-left of the lit face, on the leading edge the
-          // stack actually meets.
-          nubs.addRect(setBox(x0, yf, t, m));
-          nubs.addRect(setBox(x0, yf, m, t));
-          nubs.addRect(setBox(x0, tileBottom - m, t, m));
-          // Right-hand corners, so the tile is closed on both sides.
-          nubs.addRect(setBox(x1 - t, yb, t, m));
-          nubs.addRect(setBox(x1 - m, yb, m, t));
         }
 
-        // Rounded front faces over the flat body, then the recessed seams
-        // between cubes, then the lit top faces. Three draws for the whole
-        // wall however tall it is.
-        wallPaint.setColor(cSide);
-        wallPaint.setAlphaf(1);
-        canvas.drawPath(sides, wallPaint);
-
-        wallPaint.setColor(cFace);
-        canvas.drawPath(fronts, wallPaint);
-
-        wallPaint.setColor(cMortar);
-        canvas.drawPath(seams, wallPaint);
-
-        wallPaint.setColor(cTileTop);
-        canvas.drawPath(tops, wallPaint);
-
-        if (hasNubs) {
-          wallPaint.setColor(cRim);
-          wallPaint.setAlphaf(0.95);
-          canvas.drawPath(nubs, wallPaint);
-        }
 
         // 8-9. Caps, drawn only on an end bordering an opening. An end flush
         //      with the play-field edge is not a boundary and gets none.
