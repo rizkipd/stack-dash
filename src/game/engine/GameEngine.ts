@@ -293,7 +293,17 @@ export class GameEngine {
     );
     if (item) this.collectibles.push(item);
 
-    this.nextSpawnX = spawnX + nextSpawnGap(this.difficulty, this.distance);
+    // Measure the next spawn from this obstacle's RIGHT EDGE, not its left.
+    //
+    // Patterns are not all one wall wide: `staggered` spans 396 world units.
+    // Spacing from the left edge meant that once the distance ramp tightened
+    // the gap below the pattern's own width, the next obstacle spawned *inside*
+    // the previous one. Two individually-passable patterns then overlapped into
+    // a solid barrier — each is legal alone, so per-pattern validation could
+    // never catch it. `scripts/audit-fairness.mjs` scans the composed world for
+    // exactly this.
+    this.nextSpawnX =
+      result.rightEdge + nextSpawnGap(this.difficulty, this.distance);
   }
 
   private despawn(): void {
