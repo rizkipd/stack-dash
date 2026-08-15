@@ -16,7 +16,8 @@
     "postinstall": "node scripts/copy-canvaskit.mjs",
     "preview": "tsx scripts/preview.mjs",
     "audit:fairness": "tsx scripts/audit-fairness.mjs",
-    "icons": "node scripts/icon-from-sheet.mjs"
+    "icons": "node scripts/icon-from-sheet.mjs",
+    "audit:render": "tsx scripts/audit-renderstate.mjs"
   },
   "jest": {
     "preset": "jest-expo",

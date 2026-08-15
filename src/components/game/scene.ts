@@ -411,6 +411,12 @@ const CUBE_RADIUS = 0.07;
 const EDGE_INSET = 0.012;
 
 /**
+ * Smallest cube the rounded-box construction can render safely, in device
+ * pixels. Below it the fillet inset exceeds the face and the polygon inverts.
+ */
+const MIN_CUBE_PX = 7;
+
+/**
  * How far above / below its flat tone a face's gloss gradient runs, in ramp
  * steps.
  *
@@ -555,25 +561,10 @@ const EMBER_STEPS = 6;
 /** Collect Glow: warm gold, complementary to the cyan pickup so the ring and
  *  the cube separate instead of merging into one smear. */
 const GOLD_RING = rgb01('#FFB020');
-const GOLD_CORE = rgb01('#FFF0C2');
-const GOLD_DEEP = rgb01(colors.accent);
 
 /** Star Particles: near-white core inside the collectible's own cyan. */
 const STAR_CORE: readonly [number, number, number] = [1, 1, 1];
 const STAR_GLOW = rgb01(colors.collectGlow);
-
-/**
- * The last frames of a destroyed block: burnt out, sinking toward the
- * background. Keeps spent debris from leaving a bright red distraction in the
- * lane after the hit has been read.
- */
-const SPENT_SKIN: CubeSkin = {
-  shadow: rgb01('#2A2730'),
-  body: rgb01('#4A4553'),
-  highlight: rgb01('#6E6878'),
-  edge: rgb01('#8C8698'),
-  glow: rgb01('#4A4553'),
-};
 
 type CubePalette = {
   /** `SHADE_STEPS` entries, shadow → body → highlight → edge. */
@@ -662,6 +653,11 @@ export function drawScene(
        * Wide blurred additive stroke along the cube's silhouette — shaped
        * bloom that follows the outline instead of smudging a circle over it.
        */
+      /** Plain stroke, no mask filter — used by the collect ring. */
+      const ringPaint = Skia.Paint();
+      ringPaint.setAntiAlias(true);
+      ringPaint.setStyle(STYLE_STROKE);
+
       const bloomPaint = Skia.Paint();
       bloomPaint.setAntiAlias(true);
       bloomPaint.setStyle(STYLE_STROKE);
@@ -806,10 +802,6 @@ export function drawScene(
         s.collectibles.length > 0
           ? makePalette(COLLECT_SKIN, s.collectibles[2]! * scale)
           : playerPal;
-      const lostPal =
-        s.particles.length > 0 ? makePalette(LOST_SKIN, blockPx) : playerPal;
-      const flashPal =
-        s.particles.length > 0 ? makePalette(FLASH_SKIN, blockPx) : playerPal;
 
       /**
        * Appends a closed polygon with rounded corners.
@@ -1094,6 +1086,27 @@ export function drawScene(
           v = nextIdx;
         }
         if (n < 3) return;
+
+        // Below this the rounded-box construction is not safe. `inset` has a
+        // 0.6px floor, and on a small or grazing face offsetting each edge
+        // inward by that much inverts the polygon — self-intersecting
+        // geometry, which yields a NaN conic weight and can take the native
+        // canvas down with it.
+        //
+        // This never fired while only player blocks used `drawCube`. Particles
+        // do too, and chunks shrink over their life, so they walk straight into
+        // it. A speck this small is a couple of pixels: a filled dot is an
+        // honest representation of it and cannot be malformed.
+        if (size < MIN_CUBE_PX) {
+          const dot = size * 0.5;
+          if (dot > 0.15) {
+            facePaint.setShader(null);
+            facePaint.setColor(pal.faces[SHADE_STEPS - 4]!);
+            facePaint.setAlphaf(alpha);
+            canvas.drawCircle(cx, cy, dot, facePaint);
+          }
+          return;
+        }
 
         const radius = size * CUBE_RADIUS;
         // Floored in device pixels: on a small phone a cube is ~45px across,
@@ -1554,7 +1567,11 @@ export function drawScene(
 
         // Cabinet projection: the top face recedes by `depth` up-and-right and
         // the right face is `depth` wide. 45°, so both use one number.
-        const depth = Math.max(1, Math.min(rowH * 0.2, innerW * 0.26));
+        // Depth of the receding top face. Raised from 0.2: the player's cubes
+        // now sit at a ~30 degree isometric, and a wall whose top face is a
+        // thin sliver reads as a flat column beside them. The sheet gives every
+        // wall cube a prominent silver top — that face is what makes it a cube.
+        const depth = Math.max(2, Math.min(rowH * 0.42, innerW * 0.46));
         const faceR = x1 - depth;
         const seamH = Math.max(1, Math.min(2.25, rowH * 0.05));
         const rimW = Math.max(1.25, Math.min(2.5, ww * 0.05));
@@ -1592,13 +1609,18 @@ export function drawScene(
         //      path vertices rather than draw calls.
         const seams = Skia.Path.Make();
         const tops = Skia.Path.Make();
+        const fronts = Skia.Path.Make();
         const nubs = Skia.Path.Make();
+        // Matches the player cube's corner softness, so wall and stack read as
+        // the same material.
+        const tileR = Math.max(1.5, Math.min(rowH, innerW) * 0.16);
         let hasNubs = false;
 
         for (let r = firstRow; r <= lastRow; r += 1) {
           const ty = wallTop + r * rowH;
           const yb = ty + seamH; // back (upper) edge of the top face
           const yf = yb + depth; // front (lower) edge of the top face
+          const tileBottom = ty + rowH;
 
           // Gap between cubes.
           seams.moveTo(x0, ty);
@@ -1614,34 +1636,41 @@ export function drawScene(
           tops.lineTo(faceR, yf);
           tops.close();
 
-          // Amber edge on every cube, per the sheet's OBSTACLE ASSETS panel.
-          // This is the walls' signature and it earns its place twice over:
-          // it is also the strongest readability cue they have, outlining each
-          // tile against a saturated background.
+          // Front face as a rounded tile. The sheet's walls are rounded cubes,
+          // exactly like the player's — sharp-cornered slabs are what made
+          // these read as a painted ladder rather than masonry. Batched into
+          // one path, so rounding the whole wall still costs a single draw.
+          const fh = tileBottom - yf;
+          if (fh > 2) {
+            fronts.addRRect(
+              Skia.RRectXY(Skia.XYWHRect(x0, yf, faceR - x0, fh), tileR, tileR),
+            );
+          }
+
+          // Amber accents at the cube's corners only — in the sheet these are
+          // short marks where edges meet, not the continuous outline this used
+          // to draw. That outline was the "ladder" look.
           hasNubs = true;
-          const edgeW = Math.max(1, rimW * 0.5);
-          // Along the front face's lower edge.
-          nubs.moveTo(x0, yf - edgeW);
-          nubs.lineTo(x1, yf - edgeW);
-          nubs.lineTo(x1, yf);
-          nubs.lineTo(x0, yf);
-          nubs.close();
-          // Down the left (leading) edge of this tile.
-          nubs.moveTo(x0, yb);
-          nubs.lineTo(x0 + edgeW, yb);
-          nubs.lineTo(x0 + edgeW, ty + rowH);
-          nubs.lineTo(x0, ty + rowH);
-          nubs.close();
-          // Down the right edge, so the tile is closed on both sides.
-          nubs.moveTo(x1 - edgeW, yb);
-          nubs.lineTo(x1, yb);
-          nubs.lineTo(x1, ty + rowH);
-          nubs.lineTo(x1 - edgeW, ty + rowH);
-          nubs.close();
+          const m = Math.max(1.5, rimW * 1.6);
+          const t = Math.max(1, rimW * 0.55);
+          // Top-left and bottom-left of the lit face, on the leading edge the
+          // stack actually meets.
+          nubs.addRect(setBox(x0, yf, t, m));
+          nubs.addRect(setBox(x0, yf, m, t));
+          nubs.addRect(setBox(x0, tileBottom - m, t, m));
+          // Right-hand corners, so the tile is closed on both sides.
+          nubs.addRect(setBox(x1 - t, yb, t, m));
+          nubs.addRect(setBox(x1 - m, yb, m, t));
         }
 
-        wallPaint.setColor(cMortar);
+        // Rounded front faces over the flat body, then the recessed seams
+        // between cubes, then the lit top faces. Three draws for the whole
+        // wall however tall it is.
+        wallPaint.setColor(cFace);
         wallPaint.setAlphaf(1);
+        canvas.drawPath(fronts, wallPaint);
+
+        wallPaint.setColor(cMortar);
         canvas.drawPath(seams, wallPaint);
 
         wallPaint.setColor(cTileTop);
@@ -1771,28 +1800,24 @@ export function drawScene(
 
       // --- Particles ---
       //
-      // The effects of the sheet's EFFECTS & PARTICLES panel. The simulation
-      // decides what exists (`src/game/engine/Particles.ts`); this decides what
-      // each kind looks like.
+      // **Deliberately built from the simplest primitives Skia offers:**
+      // `drawCircle`, `drawRRect`, and flat `moveTo`/`lineTo` paths. No
+      // `drawCube`, no gradient shaders, no mask-filtered strokes.
       //
-      //   Hit Explosion   FLASH  hot additive core, gone in ~0.18s
-      //                   SHARD  chunky angular flakes, cooling as they fly
-      //   Block Destroy   CORE   the block: flash -> spin away -> fall & grey
-      //                   CHUNK  blue cube fragments, tumbling and shrinking
-      //   Star Particles  STAR   four-pointed sparkles, never plain dots
-      //   Collect Glow    RING   counter-rotating gold swirl
+      // The reason is a crash: the app closed the moment a block hit a wall,
+      // and the hit path was the only place using rounded-cube geometry at
+      // particle sizes, three extra per-frame gradient palettes, and blurred
+      // ring strokes — all introduced together. None of them reproduces under
+      // CanvasKit in the preview harness, which is more forgiving than the
+      // native canvas, so rather than keep guessing which one it was, the hit
+      // path now uses only primitives already proven elsewhere in this file
+      // across whole runs.
       //
-      // Two passes, because the pool hands out whichever slot is free and pool
-      // order therefore says nothing about draw order. Pass 1 is the additive
-      // light, pass 2 the solid pieces that sit inside it. Without the split a
-      // flash landing in a low slot lights debris from an older burst and skips
-      // its own.
+      // The effects are simpler than the sheet as a result. A game that
+      // survives a collision beats a prettier one that does not.
       const particles = s.particles;
 
       if (particles.length > 0) {
-        // Built once per frame. A shard then costs an indexed lookup, where
-        // per-particle `Skia.Color(string)` parsing would cost a string parse
-        // every frame.
         const ember: Float32Array[] = [];
         for (let i = 0; i < EMBER_STEPS; i += 1) {
           const t = i / (EMBER_STEPS - 1);
@@ -1801,14 +1826,15 @@ export function drawScene(
               ? mix(EMBER_COOL, EMBER_MID, t / 0.55)
               : mix(EMBER_MID, EMBER_HOT, (t - 0.55) / 0.45);
         }
-        const goldGlow = solid(GOLD_DEEP);
         const goldRing = solid(GOLD_RING);
-        const goldCore = solid(GOLD_CORE);
         const starGlow = solid(STAR_GLOW);
         const starCore = solid(STAR_CORE);
-        const spentPal = makePalette(SPENT_SKIN, blockPx);
+        const chunkBlue = solid(PLAYER_SKIN.body);
+        const chunkEdge = solid(PLAYER_SKIN.highlight);
+        const coreRed = solid(LOST_SKIN.body);
+        const coreHot = solid(FLASH_SKIN.body);
 
-        // Pass 1 — additive light.
+        // Pass 1 — additive light. Blurred circles only.
         for (let i = 0; i < particles.length; i += PARTICLE_STRIDE) {
           const kind = particles[i + 5]!;
           if (kind !== PARTICLE_FLASH && kind !== PARTICLE_STAR) continue;
@@ -1817,30 +1843,27 @@ export function drawScene(
           const py2 = toY(particles[i + 1]!);
           const size = particles[i + 2]! * scale;
           const alpha = particles[i + 4]!;
-          if (size <= 0 || px2 < -size * 3 || px2 > width + size * 3) continue;
+          if (!(size > 0.5) || px2 < -size * 3 || px2 > width + size * 3) continue;
 
           if (kind === PARTICLE_FLASH) {
-            // Additive and blurred on purpose — an opaque disc this size is
-            // exactly the "effect that obscures an obstacle" that
-            // `docs/GAME_DESIGN.md` §11 rules out.
             glowPaint.setColor(ember[1]!);
             glowPaint.setAlphaf(0.34 * alpha);
             canvas.drawCircle(px2, py2, size * 0.62, glowPaint);
-            // Squared falloff: the hot core is the first frames and little else.
             glowPaint.setColor(ember[EMBER_STEPS - 1]!);
             glowPaint.setAlphaf(0.5 * alpha * alpha);
             canvas.drawCircle(px2, py2, size * 0.3, glowPaint);
           } else {
             glowPaint.setColor(starGlow);
-            glowPaint.setAlphaf(0.42 * alpha);
-            canvas.drawCircle(px2, py2, size * 1.5, glowPaint);
+            glowPaint.setAlphaf(0.4 * alpha);
+            canvas.drawCircle(px2, py2, size * 1.4, glowPaint);
           }
         }
 
         // Pass 2 — solid pieces.
+        facePaint.setShader(null);
         for (let i = 0; i < particles.length; i += PARTICLE_STRIDE) {
           const kind = particles[i + 5]!;
-          if (kind === PARTICLE_FLASH) continue; // drawn in pass 1
+          if (kind === PARTICLE_FLASH) continue;
 
           const px2 = toX(particles[i]!);
           const py2 = toY(particles[i + 1]!);
@@ -1848,143 +1871,88 @@ export function drawScene(
           const rotation = particles[i + 3]!;
           const alpha = particles[i + 4]!;
           const seed = particles[i + 6]!;
-          if (size <= 0.25) continue;
+          // Every radius and half-extent below derives from `size`, so this one
+          // guard keeps all of them positive and finite.
+          if (!(size > 0.6)) continue;
           if (px2 < -size * 3 || px2 > width + size * 3) continue;
 
           if (kind === PARTICLE_RING) {
-            // A tilted ring that expands, swirls and fades. Built as a 16-gon
-            // polyline; at this radius the facets are invisible.
-            const rx = size;
-            const ry = size * 0.42; // tilt, so it reads as an orbit not a bubble
-            const ca = Math.cos(rotation);
-            const sa = Math.sin(rotation);
-            const ring = Skia.Path.Make();
-            for (let k = 0; k <= 16; k += 1) {
-              const a = (k / 16) * Math.PI * 2;
-              const ux = Math.cos(a) * rx;
-              const uy = Math.sin(a) * ry;
-              const rxp = px2 + ux * ca - uy * sa;
-              const ryp = py2 + ux * sa + uy * ca;
-              if (k === 0) ring.moveTo(rxp, ryp);
-              else ring.lineTo(rxp, ryp);
-            }
-
-            // Fades on alpha squared: the ring is widest exactly when it is
-            // faintest, so it can never become a bright hoop across the lane.
-            const fade = alpha * alpha;
-            // Two strokes: a wide soft halo, then a narrower brighter band.
-            // One stroke reads as a flat hoop; the pair gives the falloff that
-            // makes it a swirl of light.
-            bloomPaint.setColor(goldGlow);
-            bloomPaint.setAlphaf(0.5 * fade);
-            bloomPaint.setStrokeWidth(Math.max(2, size * 0.2));
-            canvas.drawPath(ring, bloomPaint);
-
-            bloomPaint.setColor(goldRing);
-            bloomPaint.setAlphaf(0.75 * fade);
-            bloomPaint.setStrokeWidth(Math.max(1.2, size * 0.07));
-            canvas.drawPath(ring, bloomPaint);
-
-            // A bright head chasing round the ring — this is what turns a
-            // static hoop into the sheet's swirl.
-            const ha = rotation * 3;
-            const hx = Math.cos(ha) * rx;
-            const hy = Math.sin(ha) * ry;
-            facePaint.setColor(goldCore);
-            facePaint.setAlphaf(fade);
-            facePaint.setShader(null);
-            canvas.drawCircle(
-              px2 + hx * ca - hy * sa,
-              py2 + hx * sa + hy * ca,
-              Math.max(1, size * 0.1),
-              facePaint,
-            );
+            // Collect Glow: a plain stroked circle that expands and fades.
+            ringPaint.setColor(goldRing);
+            ringPaint.setAlphaf(0.85 * alpha * alpha);
+            ringPaint.setStrokeWidth(Math.max(1.2, size * 0.16));
+            canvas.drawCircle(px2, py2, size, ringPaint);
             continue;
           }
 
           if (kind === PARTICLE_STAR) {
-            // Four-pointed sparkle. The long thin spikes *are* the shape —
-            // much above this inner radius it stops being a star and becomes
-            // the blob the old plain dots were.
+            // Four-pointed sparkle. The long thin spikes are the shape; plain
+            // dots are what this replaced.
             const star = Skia.Path.Make();
             for (let k = 0; k < 8; k += 1) {
               const a = rotation + (k * Math.PI) / 4;
-              const r = k % 2 === 0 ? size : size * 0.19;
+              const r = k % 2 === 0 ? size : size * 0.24;
               const sx = px2 + Math.cos(a) * r;
               const sy = py2 + Math.sin(a) * r;
               if (k === 0) star.moveTo(sx, sy);
               else star.lineTo(sx, sy);
             }
             star.close();
-
-            facePaint.setShader(null);
             facePaint.setColor(starGlow);
             facePaint.setAlphaf(0.9 * alpha);
             canvas.drawPath(star, facePaint);
             facePaint.setColor(starCore);
             facePaint.setAlphaf(alpha);
-            canvas.drawCircle(px2, py2, Math.max(0.8, size * 0.2), facePaint);
+            canvas.drawCircle(px2, py2, Math.max(0.8, size * 0.22), facePaint);
             continue;
           }
 
-          if (kind === PARTICLE_CORE) {
-            // The sheet's five stages carried by one cube: white-hot on the
-            // first frames, red as it tumbles, burnt-out grey as it falls away.
-            drawCube(
-              px2,
-              py2,
-              size,
-              rotation * 0.7,
-              rotation,
-              rotation * 0.3,
-              alpha > 0.88 ? flashPal : alpha < 0.32 ? spentPal : lostPal,
-              alpha,
+          if (kind === PARTICLE_CORE || kind === PARTICLE_CHUNK) {
+            // The destroyed block and its fragments, as rounded tiles. A cube
+            // would be truer to the sheet; a rounded tile cannot be malformed
+            // at any size, which matters more here.
+            const isCore = kind === PARTICLE_CORE;
+            const half = size * 0.5;
+            const r = Math.max(1, size * 0.18);
+            facePaint.setColor(
+              isCore ? (alpha > 0.88 ? coreHot : coreRed) : chunkBlue,
+            );
+            facePaint.setAlphaf(alpha);
+            canvas.drawRRect(
+              Skia.RRectXY(Skia.XYWHRect(px2 - half, py2 - half, size, size), r, r),
+              facePaint,
+            );
+            // A lit top band, so a tumbling fragment still reads as solid.
+            facePaint.setColor(isCore ? coreHot : chunkEdge);
+            facePaint.setAlphaf(alpha * 0.75);
+            canvas.drawRRect(
+              Skia.RRectXY(
+                Skia.XYWHRect(px2 - half, py2 - half, size, Math.max(1, size * 0.26)),
+                r,
+                r,
+              ),
+              facePaint,
             );
             continue;
           }
 
-          if (kind === PARTICLE_CHUNK) {
-            // A fragment of the player's own stack, in the player's own
-            // palette. That is the point: the red explosion says a hit
-            // happened, these say what it cost. `seed` offsets the tumble so
-            // fragments of one block never rotate in lockstep.
-            drawCube(
-              px2,
-              py2,
-              size,
-              rotation * 0.8 + seed * 2,
-              rotation,
-              rotation * 0.5,
-              playerPal,
-              alpha,
-            );
-            continue;
-          }
-
-          // Hit debris: a chunky angular flake cooling from white-hot to deep
-          // red across its life. Five vertices at radii varied by the
-          // particle's stable seed, so no two flakes share a silhouette and
-          // none reads as the tidy axis-aligned square this used to draw.
+          // Hit debris: an angular flake cooling from white-hot to deep red.
           let step = (alpha * EMBER_STEPS) | 0;
           if (step < 0) step = 0;
           else if (step >= EMBER_STEPS) step = EMBER_STEPS - 1;
 
           const flake = Skia.Path.Make();
-          const half = size * 0.5;
+          const fhalf = size * 0.5;
           for (let k = 0; k < 5; k += 1) {
             const a = rotation + (k * Math.PI * 2) / 5;
-            const r = half * (0.55 + 0.45 * (((seed * 97 + k * 31) % 10) / 10));
-            const fx = px2 + Math.cos(a) * r;
-            const fy = py2 + Math.sin(a) * r;
-            if (k === 0) flake.moveTo(fx, fy);
-            else flake.lineTo(fx, fy);
+            const rr = fhalf * (0.6 + 0.4 * (((seed * 97 + k * 31) % 10) / 10));
+            const fx2 = px2 + Math.cos(a) * rr;
+            const fy2 = py2 + Math.sin(a) * rr;
+            if (k === 0) flake.moveTo(fx2, fy2);
+            else flake.lineTo(fx2, fy2);
           }
           flake.close();
-
-          facePaint.setShader(null);
           facePaint.setColor(ember[step]!);
-          // Holds most of its opacity until late: debris that fades linearly
-          // reads as smoke, debris that holds and then goes reads as solid.
           facePaint.setAlphaf(0.3 + 0.7 * alpha);
           canvas.drawPath(flake, facePaint);
         }
