@@ -2,13 +2,16 @@ import {
   BlendMode,
   BlurStyle,
   Canvas,
-  Fill,
+  LinearGradient,
   PaintStyle,
   Picture,
+  RadialGradient,
+  Rect,
   Skia,
   StrokeCap,
   StrokeJoin,
   createPicture,
+  vec,
 } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 
@@ -78,6 +81,244 @@ const CUBE_EDGES: readonly number[] = [
 
 /** Camera distance in half-cube units. Larger = weaker perspective. */
 const CAMERA_Z = 5.2;
+
+// --- Background: neon night city ---
+//
+// Transcribed from the BACKGROUND LAYERS panel of `image copy 2.png`: Far City,
+// Mid Buildings, Near Buildings, Ground/Road, plus the Static Particles panel.
+//
+// The governing constraint (`docs/ART_DIRECTION.md` §1) shapes every number
+// here: gameplay objects must stay strongly contrasted against this. Two rules
+// keep that true, and they are why the tints look as they do.
+//
+//   1. Nothing sits at the obstacle's own brightness. `colors.obstacle`
+//      (#27272A) has relative luminance ~0.021. Every skyline tint is well
+//      below it, so a wall reads as a lighter neutral column against a darker
+//      saturated silhouette; the sky's magenta core is well above it, so a wall
+//      crossing the glow reads as a hard dark shape (~2.7:1 there).
+//   2. Detail is graded by height. The top ~45% of the frame is clean gradient
+//      with only a few 1px sparkles, because that is where an approaching wall
+//      must be picked out earliest.
+
+/** Ground line, as a fraction of canvas height. The skyline stands on it. */
+const HORIZON = 0.82;
+
+/**
+ * Global parallax/drift multiplier.
+ *
+ * Parallax is decorative (`docs/ART_DIRECTION.md` §6), so it is the first thing
+ * to go under the OS reduce-motion setting: 0 freezes the city, clouds,
+ * sparkles and road lights in one move and touches nothing else. The block
+ * destruction cue is load-bearing and lives elsewhere.
+ */
+const MOTION = 1;
+
+/** Amplitude of the horizon line's breathing, 0..1. Also 0 for reduce-motion. */
+const HORIZON_BREATH = 0.08;
+
+/**
+ * Sky gradient, top → bottom.
+ *
+ * `bgTop`/`bgMid`/`bgBottom` are the spine from `docs/ART_DIRECTION.md` §2; the
+ * other stops are derived shades that give the magenta a *core* to bloom from
+ * rather than a flat band. The brightest stop sits where the far city occludes
+ * most of it.
+ */
+const SKY_COLORS = [
+  '#0D0B2C', // deeper than bgTop, so a wall high on screen still reads
+  colors.bgTop,
+  colors.bgMid,
+  '#7A2A93',
+  '#B33A85', // magenta core, behind the far city
+  colors.bgBottom,
+  '#3E1030',
+  colors.ground,
+];
+const SKY_STOPS = [0, 0.22, 0.45, 0.61, 0.71, 0.79, 0.87, 1];
+
+/** City bloom lifting off the skyline. Three stops fake a squared falloff. */
+const BLOOM_COLORS = [
+  'rgba(226, 82, 168, 0.30)',
+  'rgba(226, 82, 168, 0.13)',
+  'rgba(226, 82, 168, 0)',
+];
+const BLOOM_STOPS = [0, 0.45, 1];
+
+/**
+ * Background render parameters, grouped for the same reason block colour is a
+ * parameter: a post-MVP skin should be a config change, not a refactor.
+ */
+const background = {
+  /** Aerial haze the far layers dissolve into. */
+  haze: '#8A2E86',
+  /** Magenta uplight pooling at street level. */
+  uplight: '#C4368A',
+  /**
+   * Lit windows. Small, flat and un-bloomed — that is what stops a 3px cyan
+   * dot ever being confused with the 40px glowing collectible cube.
+   */
+  windowWarm: '#F5B942',
+  windowCool: '#5FD7F2',
+  rim: '#6B58A8',
+  cloud: '#7B4BC4',
+  sparkle: '#CFF6FF',
+  /**
+   * Road kerb. Thin by design: a large light band here would eat the player
+   * block's contrast, which is the opposite of what the ground is for.
+   */
+  kerb: '#9AA3BF',
+  /** Street lights — brightest element, and the cue separating field from sky. */
+  lamp: colors.accent,
+  lampCore: '#FFC864',
+};
+
+/**
+ * Deterministic variation, sampled by index.
+ *
+ * `Math.random()` is banned in the picture worklet: it re-evaluates every
+ * frame, so a random skyline would strobe rather than scroll. A fixed table
+ * gives a stable city and costs an array index instead of a hash.
+ */
+const NOISE: readonly number[] = [
+  0.972, 0.25, 0.781, 0.689, 0.798, 0.812, 0.132, 0.49, 0.196, 0.219, 0.15,
+  0.233, 0.399, 0.569, 0.678, 0.87, 0.492, 0.639, 0.641, 0.722, 0.588, 0.759,
+  0.428, 0.35, 0.194, 0.691, 0.263, 0.433, 0.595, 0.502, 0.581, 0.644, 0.221,
+  0.437, 0.404, 0.52, 0.027, 0.795, 0.157, 0.332, 0.965, 0.682, 0.252, 0.696,
+  0.561, 0.882, 0.666, 0.67, 0.84, 0.796, 0.159, 0.083, 0.082, 0.328, 0.667,
+  0.099, 0.9, 0.436, 0.786, 0.177, 0.199, 0.671, 0.938, 0.151,
+];
+
+type SkylineLayer = {
+  /** Parallax rate. Far scrolls slowest, ground fastest. */
+  rate: number;
+  /**
+   * Buildings per screen width. Proportional, so the draw-call budget is fixed
+   * however wide the device is — a tablet gets wider buildings, not more.
+   */
+  cells: number;
+  hMin: number;
+  hMax: number;
+  /**
+   * Width range as a fraction of the cell. Gaps matter more than bodies: they
+   * are what lets the magenta core show through.
+   */
+  wMin: number;
+  wVar: number;
+  /** Base line raised above the horizon, so a far tower is not fully hidden. */
+  lift: number;
+  tint: string;
+  alpha: number;
+  /** Noise offset, so no two layers share a skyline. */
+  salt: number;
+  winCols: number;
+  winRows: number;
+  /** Lit top/left edge. Off for the far city — at that size it reads as noise. */
+  rim: boolean;
+  caps: boolean;
+  /** Haze drawn over this layer, pushing it behind the next one. */
+  veilSteps: number;
+  veilAlpha: number;
+  veilSpan: number;
+};
+
+const SKYLINE: readonly SkylineLayer[] = [
+  {
+    rate: 0.05,
+    cells: 20,
+    hMin: 0.07,
+    hMax: 0.21,
+    wMin: 0.46,
+    wVar: 0.34,
+    lift: 0.032,
+    tint: '#35256A',
+    alpha: 0.82,
+    salt: 0,
+    winCols: 0,
+    winRows: 0,
+    rim: false,
+    caps: false,
+    veilSteps: 9,
+    veilAlpha: 0.44,
+    veilSpan: 0.27,
+  },
+  {
+    rate: 0.11,
+    cells: 9,
+    hMin: 0.11,
+    hMax: 0.27,
+    wMin: 0.4,
+    wVar: 0.28,
+    lift: 0.015,
+    tint: '#241A55',
+    alpha: 0.92,
+    salt: 5,
+    winCols: 2,
+    winRows: 5,
+    rim: true,
+    caps: false,
+    veilSteps: 7,
+    veilAlpha: 0.18,
+    veilSpan: 0.22,
+  },
+  {
+    rate: 0.22,
+    cells: 5,
+    hMin: 0.13,
+    hMax: 0.32,
+    wMin: 0.38,
+    wVar: 0.26,
+    lift: 0,
+    tint: '#150D31',
+    alpha: 1,
+    salt: 11,
+    winCols: 3,
+    winRows: 6,
+    rim: true,
+    caps: true,
+    veilSteps: 0,
+    veilAlpha: 0,
+    veilSpan: 0,
+  },
+];
+
+/**
+ * Obstacle tone ramp — a render parameter, not inlined constants, so a
+ * post-MVP wall skin stays a config change rather than a refactor
+ * (`docs/ART_DIRECTION.md` §3).
+ *
+ * Sampled from the OBSTACLE ASSETS panel of `image copy 2.png`. The ramp is
+ * deliberately wide — near-black mortar at one end, near-white cap at the
+ * other — because contrast between gameplay objects and background outranks
+ * everything else here.
+ */
+const OBSTACLE_TONES = {
+  /** Mortar, silhouette, and the gaps between cubes. */
+  mortar: '#07080F',
+  /** Cube front face. Slate with a blue cast, per the sheet. */
+  face: '#2A2C3C',
+  /** Cube right face, turned away from the light. */
+  side: '#1B1D2A',
+  /** Lit top face of an interior cube. */
+  tileTop: '#4E5366',
+  /** Top face of the cube terminating a wall at an opening. */
+  capFace: '#B5BAC9',
+  /** Brightest hairline, sitting exactly on the opening boundary. */
+  capEdge: '#DFE4EE',
+  /**
+   * Warm rim light from the ground neon. A theme token on purpose: it is the
+   * same accent as the road glow, which is what motivates it in-fiction.
+   */
+  rim: colors.accent,
+} as const;
+
+/**
+ * Hard ceiling on cube rows emitted for one wall.
+ *
+ * A wall may be the full world height (1800 units) while a cube is one wall
+ * width (90 units), so 20 rows is the natural maximum; 22 leaves headroom
+ * without letting a pathological rect build an unbounded path.
+ */
+const MAX_CUBE_ROWS = 22;
 
 // --- Lighting ---
 // Key light from upper-left, slightly toward the viewer. Screen y is down, so
@@ -219,7 +460,6 @@ export function GameCanvas({ state, width, height }: Props) {
       // --- Paints, created once per frame rather than per shape. ---
       const paint = Skia.Paint();
       paint.setAntiAlias(true);
-      const skylinePaint = Skia.Paint();
 
       // One blur serves every cube in the frame: player blocks are all one
       // size, and a slightly generous blur on smaller debris is invisible.
@@ -506,32 +746,277 @@ export function GameCanvas({ state, width, height }: Props) {
         canvas.drawPath(edges, corePaint);
       };
 
-      // --- Parallax skyline. Decorative only: it never implies a surface. ---
-      // Three layers at different rates, per the sheet's BACKGROUND LAYERS.
-      const layers = [
-        { rate: 0.06, h: 0.34, tint: '#150C2E', block: 190 },
-        { rate: 0.13, h: 0.26, tint: '#1C0F3D', block: 150 },
-        { rate: 0.24, h: 0.18, tint: '#251350', block: 110 },
-      ];
-      for (const layer of layers) {
-        skylinePaint.setColor(Skia.Color(layer.tint));
-        const scroll = (s.distance * layer.rate * scale) % layer.block;
-        const count = Math.ceil(width / layer.block) + 2;
-        for (let i = -1; i < count; i += 1) {
-          const bx = i * layer.block - scroll;
-          const bh = height * layer.h * (0.55 + ((i * 7919) % 100) / 220);
-          skylinePaint.setAlphaf(1);
-          canvas.drawRect(
-            Skia.XYWHRect(bx, height - bh, layer.block * 0.72, bh),
-            skylinePaint,
+      // --- Background: neon night city ---
+      // The sky gradient and city bloom are declarative <Canvas> children; they
+      // never change, so re-recording them every frame would be waste.
+      // Everything below scrolls, so it belongs here.
+
+      // Anti-aliasing stays off for the background: every shape is
+      // axis-aligned, and AA on abutting bands leaves visible seams.
+      const bgPaint = Skia.Paint();
+      const dotPaint = Skia.Paint();
+      dotPaint.setAntiAlias(true);
+
+      const horizonY = Math.round(height * HORIZON);
+
+      // One scratch rect, mutated in place. `SkRect` is read by value on the
+      // native side, so this removes ~250 allocations per frame.
+      const box = { x: 0, y: 0, width: 0, height: 0 };
+      const setBox = (x: number, y: number, w: number, h: number) => {
+        box.x = x;
+        box.y = y;
+        box.width = w;
+        box.height = h;
+        return box;
+      };
+      const fill = (x: number, y: number, w: number, h: number) => {
+        canvas.drawRect(setBox(x, y, w, h), bgPaint);
+      };
+
+      const noise = (index: number, salt: number) =>
+        NOISE[(((index * 7 + salt * 13) % 64) + 64) % 64]!;
+
+      /**
+       * Vertical alpha ramp as flat bands — cheaper than building a gradient
+       * shader every frame, and at these alphas the steps are invisible.
+       */
+      const veil = (top: number, bottom: number, steps: number, peak: number) => {
+        for (let k = 0; k < steps; k += 1) {
+          const y0 = Math.round(top + ((bottom - top) * k) / steps);
+          const y1 = Math.round(top + ((bottom - top) * (k + 1)) / steps);
+          bgPaint.setAlphaf((peak * (k + 0.5)) / steps);
+          fill(0, y0, width, y1 - y0);
+        }
+      };
+
+      // Colours resolved once per frame, not once per draw.
+      const hazeColor = Skia.Color(background.haze);
+      const warmColor = Skia.Color(background.windowWarm);
+      const coolColor = Skia.Color(background.windowCool);
+      const rimColor = Skia.Color(background.rim);
+      const lampColor = Skia.Color(background.lamp);
+
+      // Clouds. Barely above the sky in value: they must never read as
+      // something the stack could hit.
+      {
+        const cellW = width / 2.2;
+        const offset = s.distance * 0.035 * MOTION * scale;
+        const base = Math.floor(offset / cellW);
+        const scroll = offset - base * cellW;
+        const path = Skia.Path.Make();
+        for (let k = -1; k < 4; k += 1) {
+          const world = base + k;
+          const n0 = noise(world, 21);
+          const n1 = noise(world, 22);
+          const cx = k * cellW - scroll + cellW * (0.2 + n0 * 0.5);
+          const cy = height * (0.2 + n1 * 0.22);
+          const r0 = width * (0.055 + n0 * 0.035);
+          path.addCircle(cx, cy, r0);
+          path.addCircle(cx - r0 * 0.95, cy + r0 * 0.35, r0 * 0.62);
+          path.addCircle(cx + r0, cy + r0 * 0.4, r0 * 0.55);
+          path.addRect(setBox(cx - r0 * 1.55, cy + r0 * 0.3, r0 * 3.1, r0 * 0.7));
+        }
+        dotPaint.setColor(Skia.Color(background.cloud));
+        dotPaint.setAlphaf(0.13);
+        canvas.drawPath(path, dotPaint);
+      }
+
+      // Static particles: sparse sky dust, per the sheet's panel. Capped at
+      // 1.6px and 0.3 alpha so nothing here can mask an obstacle edge.
+      {
+        const path = Skia.Path.Make();
+        const span = width + 20;
+        const drift = s.elapsed * 3 * MOTION;
+        for (let i = 0; i < 22; i += 1) {
+          const x =
+            ((((noise(i, 30) * width * 1.4 - drift) % span) + span) % span) - 10;
+          const y =
+            height * (0.04 + noise(i, 31) * 0.58) +
+            Math.sin(s.elapsed * 0.5 * MOTION + i) * 4;
+          path.addCircle(x, y, noise(i, 32) > 0.6 ? 1.6 : 1);
+        }
+        dotPaint.setColor(Skia.Color(background.sparkle));
+        dotPaint.setAlphaf(0.3);
+        canvas.drawPath(path, dotPaint);
+      }
+
+      // Skyline: far → near, each veiled back behind the next.
+      for (let li = 0; li < SKYLINE.length; li += 1) {
+        const layer = SKYLINE[li]!;
+        const cellW = width / layer.cells;
+        const offset = s.distance * layer.rate * MOTION * scale;
+        // Index by *world* cell, not by screen slot. Keying off the loop
+        // counter — as the previous version did — made every building morph
+        // as the field scrolled past it.
+        const base = Math.floor(offset / cellW);
+        const scroll = offset - base * cellW;
+        const count = layer.cells + 2;
+        const baseY = horizonY - Math.round(height * layer.lift);
+
+        const warmPath = layer.winCols > 0 ? Skia.Path.Make() : null;
+        const coolPath = layer.winCols > 0 ? Skia.Path.Make() : null;
+        const rimPath = layer.rim ? Skia.Path.Make() : null;
+        const capPath = layer.caps ? Skia.Path.Make() : null;
+
+        const tint = Skia.Color(layer.tint);
+        bgPaint.setColor(tint);
+        bgPaint.setAlphaf(layer.alpha);
+
+        for (let k = -1; k < count; k += 1) {
+          const world = base + k;
+          const nH = noise(world, layer.salt);
+          const nW = noise(world, layer.salt + 1);
+          const nS = noise(world, layer.salt + 2);
+
+          const bh = Math.round(
+            height * (layer.hMin + nH * (layer.hMax - layer.hMin)),
+          );
+          const bw = Math.round(cellW * (layer.wMin + nW * layer.wVar));
+          const bx = Math.round(k * cellW - scroll + (cellW - bw) * 0.5);
+          const by = baseY - bh;
+          if (bx > width || bx + bw < 0) continue;
+
+          fill(bx, by, bw, bh);
+
+          if (capPath && nS > 0.45) {
+            const cw = Math.round(bw * (0.3 + nS * 0.22));
+            const ch = Math.round(bh * (0.06 + nS * 0.08));
+            capPath.addRect(
+              setBox(bx + Math.round((bw - cw) * (0.2 + nW * 0.6)), by - ch, cw, ch),
+            );
+          }
+
+          if (rimPath) {
+            rimPath.addRect(setBox(bx, by, bw, 1.5));
+            rimPath.addRect(setBox(bx, by, 1.5, bh));
+          }
+
+          if (!warmPath || !coolPath) continue;
+
+          const pad = Math.max(2, bw * 0.16);
+          const stepX = (bw - pad * 2) / layer.winCols;
+          const stepY = (bh * 0.78) / layer.winRows;
+          if (stepX < 2 || stepY < 3) continue;
+
+          const top = by + Math.max(5, bh * 0.1);
+          const ww = Math.max(1, Math.min(4, stepX * 0.44));
+          const wh = Math.max(1, Math.min(4, stepY * 0.34));
+
+          for (let c = 0; c < layer.winCols; c += 1) {
+            for (let rw = 0; rw < layer.winRows; rw += 1) {
+              const lit = noise(world * 5 + c * 3 + rw * 11, layer.salt + 4);
+              if (lit < 0.34) continue;
+              const target = lit > 0.66 ? coolPath : warmPath;
+              target.addRect(
+                setBox(
+                  bx + pad + c * stepX + (stepX - ww) * 0.5,
+                  top + rw * stepY,
+                  ww,
+                  wh,
+                ),
+              );
+            }
+          }
+        }
+
+        if (capPath) {
+          bgPaint.setColor(tint);
+          bgPaint.setAlphaf(layer.alpha);
+          canvas.drawPath(capPath, bgPaint);
+        }
+        if (rimPath) {
+          bgPaint.setColor(rimColor);
+          bgPaint.setAlphaf(0.5);
+          canvas.drawPath(rimPath, bgPaint);
+        }
+        if (warmPath && coolPath) {
+          bgPaint.setColor(warmColor);
+          bgPaint.setAlphaf(0.5 * layer.alpha);
+          canvas.drawPath(warmPath, bgPaint);
+          bgPaint.setColor(coolColor);
+          bgPaint.setAlphaf(0.42 * layer.alpha);
+          canvas.drawPath(coolPath, bgPaint);
+        }
+
+        if (layer.veilSteps > 0) {
+          bgPaint.setColor(hazeColor);
+          veil(
+            horizonY - height * layer.veilSpan,
+            horizonY,
+            layer.veilSteps,
+            layer.veilAlpha,
           );
         }
       }
 
-      // Ground / road glow line.
-      skylinePaint.setColor(Skia.Color(colors.accent));
-      skylinePaint.setAlphaf(0.35);
-      canvas.drawRect(Skia.XYWHRect(0, height - 3, width, 3), skylinePaint);
+      // Street-level uplight under the near towers.
+      bgPaint.setColor(Skia.Color(background.uplight));
+      bgPaint.setAlphaf(0.1);
+      const upH = Math.round(height * 0.035);
+      fill(0, horizonY - upH, width, upH);
+
+      // Ground / road. Kept near-black: an obstacle growing from the bottom
+      // edge is *lighter* than this, which is where its contrast down here
+      // comes from.
+      bgPaint.setColor(Skia.Color(colors.ground));
+      bgPaint.setAlphaf(1);
+      fill(0, horizonY, width, height - horizonY);
+
+      const kerbH = Math.max(2, Math.round(height * 0.006));
+      const kerbY = horizonY + 3;
+      bgPaint.setColor(Skia.Color(background.kerb));
+      bgPaint.setAlphaf(0.55);
+      fill(0, kerbY, width, kerbH);
+
+      // Street lights: fastest parallax layer, brightest element in the frame.
+      {
+        const cellW = width / 2.6;
+        const offset = s.distance * 0.3 * MOTION * scale;
+        const base = Math.floor(offset / cellW);
+        const scroll = offset - base * cellW;
+        const py = kerbY + kerbH;
+
+        const halo = Skia.Path.Make();
+        const inner = Skia.Path.Make();
+        const core = Skia.Path.Make();
+        const reflect = Skia.Path.Make();
+        for (let k = -1; k < 5; k += 1) {
+          const cx = k * cellW - scroll + cellW * 0.5;
+          halo.addCircle(cx, py, width * 0.085);
+          inner.addCircle(cx, py, width * 0.045);
+          core.addRect(
+            setBox(cx - width * 0.028, py - kerbH - 1, width * 0.056, kerbH + 2),
+          );
+          reflect.addRect(
+            setBox(cx - width * 0.012, py, width * 0.024, height * 0.05),
+          );
+        }
+        dotPaint.setColor(lampColor);
+        dotPaint.setAlphaf(0.1);
+        canvas.drawPath(halo, dotPaint);
+        dotPaint.setAlphaf(0.22);
+        canvas.drawPath(inner, dotPaint);
+        bgPaint.setColor(Skia.Color(background.lampCore));
+        bgPaint.setAlphaf(0.85);
+        canvas.drawPath(core, bgPaint);
+        bgPaint.setColor(lampColor);
+        bgPaint.setAlphaf(0.09);
+        canvas.drawPath(reflect, bgPaint);
+      }
+
+      // The amber horizon edge. Load-bearing: it separates the play field from
+      // the sky and gives the stack a datum to read against. The breath is ±8%
+      // on a 2px line — felt, not seen.
+      const breath =
+        1 - HORIZON_BREATH + HORIZON_BREATH * Math.sin(s.elapsed * 0.9 * MOTION);
+      bgPaint.setColor(lampColor);
+      bgPaint.setAlphaf(0.07 * breath);
+      fill(0, horizonY - 10, width, 10);
+      bgPaint.setAlphaf(0.2 * breath);
+      fill(0, horizonY - 3, width, 3);
+      bgPaint.setColor(Skia.Color(background.lampCore));
+      bgPaint.setAlphaf(0.75 * breath);
+      fill(0, horizonY, width, 2);
 
       // --- Screen shake. Applied to gameplay only, never the background,
       //     so the play field stays readable. ---
@@ -544,29 +1029,218 @@ export function GameCanvas({ state, width, height }: Props) {
         );
       }
 
-      // --- Obstacles: dark columns with a lit top edge so the opening
-      //     boundary is unmistakable at speed. ---
+      // --- Obstacles: stacked charcoal cubes, not slabs. ---
+      //
+      // Each wall is masonry built from cube-sized tiles that deliberately echo
+      // the player's stack. Every cube uses a fixed 45° cabinet projection —
+      // front face, lit top face receding up-and-right, shaded right face —
+      // the same 3/4 read as the sheet's OBSTACLE ASSETS panel.
+      //
+      // This deliberately does not reuse `drawCube`: walls never rotate, so a
+      // static projection is cheaper and steadier.
+      //
+      // Two edges carry the gameplay and are the brightest things in the wall:
+      // the leading (left) face the stack meets, and the cap bordering an
+      // opening. Both have hard boundaries and are never faded out.
+      //
+      // **Nothing drawn here exceeds the collision rect.** The cap is inset
+      // inside the wall rather than overhanging it, so a wall can never look
+      // taller or wider than it actually is.
+      const cMortar = Skia.Color(OBSTACLE_TONES.mortar);
+      const cFace = Skia.Color(OBSTACLE_TONES.face);
+      const cSide = Skia.Color(OBSTACLE_TONES.side);
+      const cTileTop = Skia.Color(OBSTACLE_TONES.tileTop);
+      const cCapFace = Skia.Color(OBSTACLE_TONES.capFace);
+      const cCapEdge = Skia.Color(OBSTACLE_TONES.capEdge);
+      const cRim = Skia.Color(OBSTACLE_TONES.rim);
+
+      const wallPaint = Skia.Paint();
+      wallPaint.setAntiAlias(true);
+
+      // Play-field bounds in screen space. `useGameLoop` maps the world onto
+      // the full canvas height, so a wall touching these grew from the field
+      // edge and has no opening on that side.
+      const fieldTop = offsetY;
+      const fieldBottom = height;
+
       const obstacles = s.obstacles;
       for (let i = 0; i < obstacles.length; i += OBSTACLE_STRIDE) {
-        const x = toX(obstacles[i]!);
-        const y = toY(obstacles[i + 1]!);
-        const w = obstacles[i + 2]! * scale;
-        const h = obstacles[i + 3]! * scale;
-        if (x > width || x + w < 0) continue;
+        const wx = toX(obstacles[i]!);
+        const wy = toY(obstacles[i + 1]!);
+        const ww = obstacles[i + 2]! * scale;
+        const wh = obstacles[i + 3]! * scale;
+        if (ww <= 0 || wh <= 0) continue;
+        if (wx > width || wx + ww < 0) continue;
 
-        paint.setColor(Skia.Color(colors.obstacle));
-        canvas.drawRect(Skia.XYWHRect(x, y, w, h), paint);
+        const wallTop = wy;
+        const wallBottom = wy + wh;
 
-        // Panel seams, so a tall wall does not read as a flat slab.
-        paint.setColor(Skia.Color(colors.obstacleEdge));
-        paint.setAlphaf(0.55);
-        const step = w;
-        for (let sy = y + step; sy < y + h; sy += step) {
-          canvas.drawRect(Skia.XYWHRect(x, sy, w, 1.5), paint);
+        // Vertical culling. A wall may be the full world height; only the
+        // on-screen band is ever detailed.
+        const clipTop = Math.max(wallTop, 0);
+        const clipBottom = Math.min(wallBottom, height);
+        if (clipBottom <= clipTop) continue;
+        const clipH = clipBottom - clipTop;
+
+        // Cube grid: square cubes one wall-width tall, rounded so rows divide
+        // the wall exactly and both ends terminate on a whole cube. The row cap
+        // is what bounds the work for a full-height wall.
+        let rows = Math.round(wh / ww);
+        if (rows < 1) rows = 1;
+        if (rows > MAX_CUBE_ROWS) rows = MAX_CUBE_ROWS;
+        const rowH = wh / rows;
+
+        const gutter = Math.max(0.75, Math.min(2, ww * 0.045));
+        const x0 = wx + gutter;
+        const x1 = wx + ww - gutter;
+        const innerW = x1 - x0;
+        if (innerW <= 0) continue;
+
+        // Cabinet projection: the top face recedes by `depth` up-and-right and
+        // the right face is `depth` wide. 45°, so both use one number.
+        const depth = Math.max(1, Math.min(rowH * 0.2, innerW * 0.26));
+        const faceR = x1 - depth;
+        const seamH = Math.max(1, Math.min(2.25, rowH * 0.05));
+        const rimW = Math.max(1.25, Math.min(2.5, ww * 0.05));
+
+        // 1. Mortar / silhouette. Opaque backing, so a wall is never
+        //    see-through whatever the detail passes above it do.
+        wallPaint.setColor(cMortar);
+        wallPaint.setAlphaf(1);
+        canvas.drawRect(Skia.XYWHRect(wx, clipTop, ww, clipH), wallPaint);
+
+        // 2. Front faces, as one fill: every interior cube shares this tone.
+        wallPaint.setColor(cFace);
+        canvas.drawRect(Skia.XYWHRect(x0, clipTop, faceR - x0, clipH), wallPaint);
+
+        // 3. Right faces. The top-face path below notches into this band at
+        //    every row, which is what makes the column read as cubes rather
+        //    than one extruded bar.
+        wallPaint.setColor(cSide);
+        canvas.drawRect(Skia.XYWHRect(faceR, clipTop, x1 - faceR, clipH), wallPaint);
+
+        // 4. Leading edge. Warm rim light on the exact face the stack meets —
+        //    this is the wall's near side and it has to be findable at speed.
+        wallPaint.setColor(cRim);
+        wallPaint.setAlphaf(0.3);
+        canvas.drawRect(Skia.XYWHRect(x0, clipTop, rimW, clipH), wallPaint);
+
+        // Row range, clipped to the visible band.
+        const firstRow = Math.max(0, Math.floor((clipTop - wallTop) / rowH));
+        const lastRow = Math.min(
+          rows - 1,
+          Math.floor((clipBottom - wallTop - 0.001) / rowH),
+        );
+
+        // 5-7. Per-row detail batched into three paths, so wall height costs
+        //      path vertices rather than draw calls.
+        const seams = Skia.Path.Make();
+        const tops = Skia.Path.Make();
+        const nubs = Skia.Path.Make();
+        let hasNubs = false;
+
+        // Stable seed: a wall's world y and height never change, so the
+        // variation below does not crawl as the wall scrolls left.
+        const seed = Math.round(obstacles[i + 1]! * 31 + obstacles[i + 3]! * 17);
+
+        for (let r = firstRow; r <= lastRow; r += 1) {
+          const ty = wallTop + r * rowH;
+          const yb = ty + seamH; // back (upper) edge of the top face
+          const yf = yb + depth; // front (lower) edge of the top face
+
+          // Gap between cubes.
+          seams.moveTo(x0, ty);
+          seams.lineTo(x1, ty);
+          seams.lineTo(x1, yb);
+          seams.lineTo(x0, yb);
+          seams.close();
+
+          // Lit top face, receding up-and-right.
+          tops.moveTo(x0, yf);
+          tops.lineTo(x0 + depth, yb);
+          tops.lineTo(x1, yb);
+          tops.lineTo(faceR, yf);
+          tops.close();
+
+          // Warm corner highlight on roughly two rows in three, so the masonry
+          // varies instead of reading as a ladder. Leading edge only, and below
+          // the seam, so it strengthens the near face without bridging the gap.
+          const hash = Math.sin(seed * 12.9898 + r * 78.233) * 43758.5453;
+          if (hash - Math.floor(hash) > 0.32) {
+            hasNubs = true;
+            const nubW = rimW * 1.25;
+            nubs.moveTo(x0, yb);
+            nubs.lineTo(x0 + nubW, yb);
+            nubs.lineTo(x0 + nubW, yf);
+            nubs.lineTo(x0, yf);
+            nubs.close();
+          }
         }
-        paint.setAlphaf(1);
-        canvas.drawRect(Skia.XYWHRect(x, y, w, 3), paint);
-        canvas.drawRect(Skia.XYWHRect(x, y + h - 3, w, 3), paint);
+
+        wallPaint.setColor(cMortar);
+        wallPaint.setAlphaf(1);
+        canvas.drawPath(seams, wallPaint);
+
+        wallPaint.setColor(cTileTop);
+        canvas.drawPath(tops, wallPaint);
+
+        if (hasNubs) {
+          wallPaint.setColor(cRim);
+          wallPaint.setAlphaf(0.55);
+          canvas.drawPath(nubs, wallPaint);
+        }
+
+        // 8-9. Caps, drawn only on an end bordering an opening. An end flush
+        //      with the play-field edge is not a boundary and gets none.
+        const capH = Math.min(Math.max(4, rowH * 0.34), wh * 0.34);
+        const capDepth = Math.min(capH, innerW * 0.4);
+        const edgeH = Math.max(1.5, capH * 0.26);
+        const wantTop = wallTop > fieldTop + 1;
+        const wantBottom = wallBottom < fieldBottom - 1;
+
+        for (let c = 0; c < 2; c += 1) {
+          const dir = c === 0 ? -1 : 1;
+          if (dir < 0 ? !wantTop : !wantBottom) continue;
+
+          const farY = dir < 0 ? wallTop : wallBottom;
+          const nearY = farY - dir * capH;
+
+          // Hard recess line on the body side, so the bright face always lands
+          // against black rather than bleeding into the cubes.
+          wallPaint.setColor(cMortar);
+          wallPaint.setAlphaf(1);
+          canvas.drawRect(
+            Skia.XYWHRect(x0, dir < 0 ? nearY : nearY - 1.5, innerW, 1.5),
+            wallPaint,
+          );
+
+          // Full cube face, in the same projection as the rows above it.
+          const cap = Skia.Path.Make();
+          cap.moveTo(x0, nearY);
+          cap.lineTo(x0 + capDepth, farY);
+          cap.lineTo(x1, farY);
+          cap.lineTo(x1 - capDepth, nearY);
+          cap.close();
+          wallPaint.setColor(cCapFace);
+          // An underside is physically darker than a top face. The difference
+          // is kept small on purpose: readability outranks the lighting model.
+          wallPaint.setAlphaf(dir < 0 ? 1 : 0.9);
+          canvas.drawPath(cap, wallPaint);
+
+          // The boundary hairline. The most important pixels on screen, so they
+          // are drawn last and at full strength.
+          wallPaint.setColor(cCapEdge);
+          wallPaint.setAlphaf(1);
+          canvas.drawRect(
+            Skia.XYWHRect(
+              x0 + capDepth,
+              dir < 0 ? farY : farY - edgeH,
+              innerW - capDepth,
+              edgeH,
+            ),
+            wallPaint,
+          );
+        }
       }
 
       // --- Collectibles: cyan cube inside a soft bloom, tumbling. ---
@@ -680,7 +1354,29 @@ export function GameCanvas({ state, width, height }: Props) {
 
   return (
     <Canvas style={{ width, height }}>
-      <Fill color={colors.bgMid} />
+      {/* Static and full-screen, so they are declarative children rather than
+          worklet draws — re-recording them every frame would be pure waste. */}
+      <Rect x={0} y={0} width={width} height={height}>
+        <LinearGradient
+          start={vec(0, 0)}
+          end={vec(0, height)}
+          colors={SKY_COLORS}
+          positions={SKY_STOPS}
+        />
+      </Rect>
+      <Rect
+        x={0}
+        y={height * 0.715 - width * 1.05}
+        width={width}
+        height={width * 2.1}
+      >
+        <RadialGradient
+          c={vec(width * 0.55, height * 0.715)}
+          r={width * 1.05}
+          colors={BLOOM_COLORS}
+          positions={BLOOM_STOPS}
+        />
+      </Rect>
       <Picture picture={picture} />
     </Canvas>
   );
