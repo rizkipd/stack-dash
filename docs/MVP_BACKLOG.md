@@ -2,16 +2,21 @@
 
 ## M0 --- Project Bootstrap
 
--   [ ] Create Expo + React Native + TypeScript project
--   [ ] Configure lint/typecheck/test commands
--   [ ] Create repository structure
--   [ ] Add navigation
--   [ ] Add placeholder screens
--   [ ] Confirm Android dev build
--   [ ] Confirm iOS dev build
+-   [x] Create Expo + React Native + TypeScript project
+-   [x] Configure lint/typecheck/test commands
+-   [x] Create repository structure
+-   [x] Add navigation
+-   [x] Add placeholder screens
+-   [ ] Confirm Android dev build --- *bundles clean; awaiting device boot*
+-   [ ] Confirm iOS dev build --- *bundles clean; awaiting device boot*
 
 **Acceptance:** app launches on both platforms and navigates between
 placeholder screens.
+
+**Status:** QA reports PASS with two criteria outstanding ---
+`docs/qa/M0-report.md`. Both need the Product Owner to run `npm start`
+and open the app in Expo Go on a physical iPhone and Android. **Do not
+begin M1 until M0 is signed off** (`MASTER_PROMPT.md` stop condition).
 
 ## M1 --- Core Stack & Input
 
