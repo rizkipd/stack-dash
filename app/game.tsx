@@ -4,7 +4,7 @@ import { AppState, StyleSheet, Text, View, useWindowDimensions } from 'react-nat
 import { GestureDetector } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { GameCanvas } from '@/components/game/GameCanvas';
+import { GameCanvasHost } from '@/components/game/GameCanvasHost';
 import { FeedbackBanner, type BannerKind } from '@/components/ui/FeedbackBanner';
 import { HUD } from '@/components/ui/HUD';
 import { PauseOverlay } from '@/components/ui/PauseOverlay';
@@ -162,7 +162,7 @@ export default function GameScreen() {
     <View style={styles.container}>
       <GestureDetector gesture={drag}>
         <View style={StyleSheet.absoluteFill}>
-          <GameCanvas state={renderState} width={width} height={height} />
+          <GameCanvasHost state={renderState} width={width} height={height} />
         </View>
       </GestureDetector>
 

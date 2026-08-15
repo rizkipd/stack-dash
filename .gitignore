@@ -32,6 +32,10 @@ GoogleService-Info.plist
 .metro-health-check*
 *.tsbuildinfo
 
+# CanvasKit WASM for Skia on web — ~7.7MB build artefact of an installed
+# dependency, staged into public/ by scripts/copy-canvaskit.mjs on postinstall.
+/public/canvaskit.wasm
+
 # Testing
 coverage/
 

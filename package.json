@@ -12,7 +12,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "expo lint",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "postinstall": "node scripts/copy-canvaskit.mjs"
   },
   "jest": {
     "preset": "jest-expo",
@@ -41,7 +42,8 @@
     "react-native-gesture-handler": "~2.32.0",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
-    "react-native-screens": "~4.26.0"
+    "react-native-screens": "~4.26.0",
+    "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

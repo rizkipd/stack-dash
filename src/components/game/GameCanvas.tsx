@@ -364,3 +364,6 @@ export function GameCanvas({ state, width, height }: Props) {
     </Canvas>
   );
 }
+
+/** Default export so `WithSkiaWeb` can lazy-load this module on web. */
+export default GameCanvas;
