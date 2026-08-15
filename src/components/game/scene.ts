@@ -305,17 +305,17 @@ const SKYLINE: readonly SkylineLayer[] = [
  */
 const OBSTACLE_TONES = {
   /** Mortar, silhouette, and the gaps between cubes. */
-  mortar: '#07080F',
+  mortar: '#12151F',
   /** Cube front face. Slate with a blue cast, per the sheet. */
-  face: '#2A2C3C',
+  face: '#3E4557',
   /** Cube right face, turned away from the light. */
-  side: '#1B1D2A',
+  side: '#2A3040',
   /** Lit top face of an interior cube. */
-  tileTop: '#4E5366',
+  tileTop: '#9BA5B8',
   /** Top face of the cube terminating a wall at an opening. */
-  capFace: '#B5BAC9',
+  capFace: '#C6CDDB',
   /** Brightest hairline, sitting exactly on the opening boundary. */
-  capEdge: '#DFE4EE',
+  capEdge: '#EEF2F8',
   /**
    * Warm rim light from the ground neon. A theme token on purpose: it is the
    * same accent as the road glow, which is what motivates it in-fiction.
@@ -407,10 +407,10 @@ function rgb01(hex: string): readonly [number, number, number] {
 }
 
 const PLAYER_SKIN: CubeSkin = {
-  shadow: rgb01('#1E3F96'),
-  body: rgb01(colors.block),
-  highlight: rgb01(colors.blockLight),
-  edge: [0.84, 0.97, 1],
+  shadow: rgb01('#1B4FBF'),
+  body: rgb01('#2B7FFF'),
+  highlight: rgb01('#8FCEFF'),
+  edge: [0.88, 0.98, 1],
   glow: rgb01(colors.collect),
 };
 
@@ -1206,7 +1206,7 @@ export function drawScene(
           // it is also the strongest readability cue they have, outlining each
           // tile against a saturated background.
           hasNubs = true;
-          const edgeW = Math.max(1, rimW * 0.8);
+          const edgeW = Math.max(1, rimW * 0.5);
           // Along the front face's lower edge.
           nubs.moveTo(x0, yf - edgeW);
           nubs.lineTo(x1, yf - edgeW);
@@ -1236,7 +1236,7 @@ export function drawScene(
 
         if (hasNubs) {
           wallPaint.setColor(cRim);
-          wallPaint.setAlphaf(0.72);
+          wallPaint.setAlphaf(0.95);
           canvas.drawPath(nubs, wallPaint);
         }
 

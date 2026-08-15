@@ -16,8 +16,9 @@ import { gameplay } from '../config/gameplay';
 import type { ObstaclePatternType, Rect } from '../types';
 import type { Rng } from '../engine/Rng';
 
-/** Horizontal thickness of a wall column. */
-export const WALL_THICKNESS = 90;
+/** Horizontal thickness of a wall column. Matched to the block size, so walls
+ *  and the player's stack read as the same masonry. */
+export const WALL_THICKNESS = 110;
 
 export type PatternParams = {
   /** Vertical opening size in world units. */

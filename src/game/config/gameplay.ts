@@ -13,7 +13,16 @@ export const gameplay = {
    *  This preserves "the stack moves right" without unbounded coordinates. */
   playerX: 250,
 
-  blockSize: 72,
+  /**
+   * Block edge length in world units.
+   *
+   * Raised from 72 to match the sheet, where a cube is a far larger share of
+   * the screen. This is coupled: `startingBlocks` and `gapFraction` in
+   * `difficulty.ts` must keep every tier's stack fitting through its own gap,
+   * or the generator forces a wider opening on nearly every spawn and pattern
+   * variety collapses. `npm run audit:fairness` is the check.
+   */
+  blockSize: 110,
 
   /** World units per second at speedMultiplier 1.0. */
   baseSpeed: 420,

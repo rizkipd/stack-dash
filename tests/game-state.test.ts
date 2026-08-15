@@ -25,7 +25,11 @@ describe('stack construction', () => {
 
   it('indexes blocks contiguously from the bottom', () => {
     const stack = createStack('medium');
-    expect(stack.blocks.map((b) => b.localIndex)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    // Derived, not hardcoded: starting counts are tunable balance data and a
+    // test that pins them fails on every legitimate rebalance.
+    expect(stack.blocks.map((b) => b.localIndex)).toEqual(
+      Array.from({ length: DIFFICULTY_CONFIG.medium.startingBlocks }, (_, i) => i),
+    );
   });
 });
 
@@ -73,10 +77,11 @@ describe('game state', () => {
 
   it('counts only active blocks', () => {
     const state = createGameState('easy');
-    expect(countActiveBlocks(state)).toBe(10);
+    const total = DIFFICULTY_CONFIG.easy.startingBlocks;
+    expect(countActiveBlocks(state)).toBe(total);
     state.stack.blocks[0]!.active = false;
     state.stack.blocks[1]!.active = false;
-    expect(countActiveBlocks(state)).toBe(8);
+    expect(countActiveBlocks(state)).toBe(total - 2);
   });
 });
 

@@ -38,10 +38,10 @@ Suggested starting values:
 
 | Difficulty | Starting Blocks |
 | ---------- | --------------: |
-| Easy       |              10 |
-| Medium     |               8 |
-| Hard       |               6 |
-| Insane     |               5 |
+| Easy       |               7 |
+| Medium     |               6 |
+| Hard       |               5 |
+| Insane     |               4 |
 
 These values are tunable configuration, not hard-coded game rules. They
 live in `src/game/config/difficulty.ts`.
@@ -93,12 +93,34 @@ if desired.
 
 Suggested initial tuning:
 
-| Mode   | Relative Speed | Gap        | Frequency | Starting Blocks |
-| ------ | -------------: | ---------- | --------- | --------------: |
-| Easy   |          0.85x | Large      | Low       |              10 |
-| Medium |          1.00x | Medium     | Medium    |               8 |
-| Hard   |          1.25x | Smaller    | High      |               6 |
-| Insane |          1.55x | Very small | Very high |               5 |
+| Mode   | Relative Speed | Gap fraction | Frequency | Starting Blocks |
+| ------ | -------------: | -----------: | --------- | --------------: |
+| Easy   |          0.85x |         0.48 | Low       |               7 |
+| Medium |          1.00x |         0.42 | Medium    |               6 |
+| Hard   |          1.25x |         0.36 | High      |               5 |
+| Insane |          1.55x |         0.30 | Very high |               4 |
+
+### These three columns are coupled
+
+`blockSize` (110), starting blocks and gap fraction cannot be tuned
+independently. A tier's stack must fit through its own gap with clearance:
+
+> `startingBlocks x blockSize + blockSize x 0.6  <  gapFraction x 1800`
+
+| Tier | Stack | Gap | Needs | |
+| --- | --: | --: | --: | --- |
+| Easy | 770 | 864 | 836 | ok |
+| Medium | 660 | 756 | 726 | ok |
+| Hard | 550 | 648 | 616 | ok |
+| Insane | 440 | 540 | 506 | ok |
+
+Break that and nothing crashes --- which is the danger. The generator quietly
+forces a wider opening on almost every spawn, pattern variety collapses, and
+the game just gets duller. Re-run `npm run audit:fairness` after any change
+here.
+
+Counts came down from 10/8/6/5 when `blockSize` rose from 72 to 110 to match
+the asset sheet, where a cube occupies far more of the screen.
 
 `image.png` shows these as a 4 / 6 / 8 / 10 display scale. That is a
 **UI presentation of speed for the player**, not the simulation value;

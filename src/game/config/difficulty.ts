@@ -36,8 +36,8 @@ export type DifficultyConfig = {
 export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
   easy: {
     speedMultiplier: 0.85,
-    startingBlocks: 10,
-    gapFraction: 0.45,
+    startingBlocks: 7,
+    gapFraction: 0.48,
     spawnSpacing: 520,
     collectibleChance: 0.35,
     displaySpeed: 4,
@@ -46,8 +46,8 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
   },
   medium: {
     speedMultiplier: 1.0,
-    startingBlocks: 8,
-    gapFraction: 0.36,
+    startingBlocks: 6,
+    gapFraction: 0.42,
     spawnSpacing: 440,
     collectibleChance: 0.25,
     displaySpeed: 6,
@@ -56,8 +56,8 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
   },
   hard: {
     speedMultiplier: 1.25,
-    startingBlocks: 6,
-    gapFraction: 0.28,
+    startingBlocks: 5,
+    gapFraction: 0.36,
     spawnSpacing: 380,
     collectibleChance: 0.18,
     displaySpeed: 8,
@@ -67,8 +67,8 @@ export const DIFFICULTY_CONFIG: Record<Difficulty, DifficultyConfig> = {
   /** Amendment A-2026-08-15-1. Config only — introduces no new systems. */
   insane: {
     speedMultiplier: 1.55,
-    startingBlocks: 5,
-    gapFraction: 0.22,
+    startingBlocks: 4,
+    gapFraction: 0.3,
     spawnSpacing: 330,
     collectibleChance: 0.14,
     displaySpeed: 10,

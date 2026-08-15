@@ -98,8 +98,13 @@ const PHASE_PER_BLOCK = 0.011;
  *
  * ~17 deg gives the three-quarter read of the reference without so much top
  * face that the front one gets crushed.
+ *
+ * **Negative on purpose.** World −y renders upward on screen, so a positive
+ * angle tips the cube onto its *underside* — which is what shipped, lighting
+ * the scene from above while showing the one face the light never reaches.
+ * Caught by rendering the app icon, where a lone cube made it obvious.
  */
-const VIEW_ELEVATION = 0.3;
+const VIEW_ELEVATION = -0.3;
 
 /**
  * Packs the engine's current state for the renderer.
