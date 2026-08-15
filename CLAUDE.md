@@ -158,12 +158,38 @@ Zustand, Howler.js, Framer Motion, React Router). This is superseded:
 `image.png` is the **art direction of record, not the technology of
 record**. The Mission's React Native + Expo mandate stands.
 
-Resolved technology baseline:
+Resolved technology baseline *(SDK version superseded by
+Amendment A-2026-08-15-4)*:
 
--   **Expo SDK 57** / React Native 0.87.
+-   ~~**Expo SDK 57** / React Native 0.87.~~
 -   **React Native Skia** is the gameplay rendering layer; React Native
     views + Reanimated render menus and HUD.
--   **Node ^22.13.0 || ^24.3.0 || >=26.0.0** --- required by React
-    Native 0.87 and Metro. Node 20 is not supported.
 -   Dependencies are installed with `npx expo install`, never
     `npm install <pkg>@latest`, so versions stay on the SDK-pinned set.
+
+### A-2026-08-15-4 --- Target Expo SDK 54
+
+**Approved:** 2026-08-15 · **Supersedes** the SDK 57 baseline in
+A-2026-08-15-3
+
+The Product Owner's Expo Go client serves **SDK 54** and cannot be
+updated. Expo Go supports exactly one SDK at a time, so an SDK 57 project
+simply will not open on it --- and Expo Go on a physical device is the
+only device-testing route available (no Xcode, no Android SDK).
+
+Resolved baseline:
+
+-   **Expo SDK 54.0.36** / React Native 0.81.5 / React 19.1.
+-   **Node >= 20.19.4** --- React Native 0.81's requirement. The project
+    runs on Node 22 via `.node-version`; the earlier hard floor of
+    `^22.13.0` came from RN 0.87 and no longer applies.
+-   React Native Skia **2.2.12**, Reanimated **4.1.x**, Gesture Handler
+    **2.28**, expo-router **6**, expo-audio **1.1**.
+
+**The renderer is unaffected.** The offline preview
+(`npm run preview`) produces a pixel-identical frame on Skia 2.2.12,
+confirming no drawing API in use was introduced after it.
+
+Revisit when the Product Owner's Expo Go can update, or when a
+development build replaces Expo Go --- a dev build removes SDK matching
+entirely and is the durable fix.

@@ -28,13 +28,27 @@ hygiene (row 25)**.
 
 Toolchain facts for this project, verified rather than assumed:
 
--   **Node `^22.13.0 || ^24.3.0 || >=26.0.0`** --- required by React
-    Native 0.87 and Metro. Node 20 is unsupported.
--   **Expo SDK 57.** Install with `npx expo install`; the SDK pins
-    versions that differ from each package's npm `latest`.
+-   **Expo SDK 54.0.36** / React Native 0.81.5 (Amendment
+    A-2026-08-15-4). The SDK is pinned by the Product Owner's Expo Go
+    client, which serves SDK 54 and cannot update. **Do not upgrade the
+    SDK without checking that constraint first** --- Expo Go supports
+    exactly one SDK at a time, and an SDK bump instantly makes the game
+    unopenable on the only device-testing route available.
+-   **Node >= 20.19.4**, React Native 0.81's requirement. Pinned to 22
+    via `.node-version`.
+-   Install with `npx expo install`; the SDK pins versions that differ
+    from each package's npm `latest`.
 -   **Skia is included in Expo Go**, so the MVP is testable on physical
     iPhone and Android with no Xcode and no Android SDK. Native builds
     are deferred to M9/M10 via EAS cloud builds.
+-   `npx expo-doctor` must stay at 18/18. It has already caught a config
+    property silently failing schema validation and two peer
+    dependencies present only transitively --- including
+    `react-native-worklets`, which the entire renderer runs inside.
+
+An **EAS development build** is the durable fix for the Expo Go SDK
+ceiling: it removes SDK matching entirely. Propose it whenever the SDK
+constraint next blocks work.
 
 `/ios` and `/android` are gitignored --- they are prebuild output, not
 source. Never hand-edit them and never commit them.
